@@ -19,35 +19,39 @@ char *get_absolute_path(const char *filename)
     int len;
     int err;
 
-    if (!filename)
+	printk("filename: %s\n", filename);
+
+    if (!filename){
+    	printk(KERN_ERR "empty filename passato\n");
         return NULL;
+    }
 
     // Risolvi il percorso del file passato come stringa
     err = kern_path(filename, LOOKUP_FOLLOW, &path);
-    if (err)
+    if (err){
+    	printk(KERN_ERR "errore in kern_path %int\n", err);
         return NULL;
+    }
 
     // Allocazione temporanea per il percorso
-    absolute_path = (char *)kmalloc(PATH_MAX, GFP_KERNEL);
-    if (!absolute_path) {
+    tmp = (char *)kmalloc(PATH_MAX, GFP_KERNEL);
+    if (!tmp) {
+    	printk(KERN_ERR "errore nell'allocazione della memoria per tmp\n");
         path_put(&path);  // Libera risorse se l'allocazione fallisce
         return NULL;
     }
 
     // Ottieni il percorso assoluto
-    tmp = d_path(&path, absolute_path, PATH_MAX);
+    absolute_path = d_path(&path, tmp, PATH_MAX);
     path_put(&path);  // Libera risorse per il path
 
-    if (IS_ERR(tmp)) {
-        kfree(absolute_path);  // Libera la memoria in caso di errore
+    if (IS_ERR(absolute_path)) {
+    	printk(KERN_ERR "errore d_path\n");
+        kfree(tmp);  // Libera la memoria in caso di errore
         return NULL;
     }
 
-    // Calcola la lunghezza del percorso e rialloca la memoria alla giusta dimensione
-    len = strlen(tmp) + 1;
-    absolute_path = krealloc(absolute_path, len, GFP_KERNEL);
-    if (!absolute_path)
-        return NULL;  // In caso di errore nella riallocazione
-
+	printk(KERN_INFO "path: %s", absolute_path);
+    
     return absolute_path;  // Ritorna il percorso assoluto
 }
