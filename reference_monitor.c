@@ -157,13 +157,17 @@ static ssize_t rm_write(struct file *filp, const char __user *buf, size_t count,
 int check_list(char *abs_path){
 	path_node *curr=config.head;
 	
+	spin_lock(&config.lock);
+	
 	while(curr){
 		if(strcmp(curr->path, abs_path)==0){
 			printk(KERN_INFO "Path already exist %s\n", abs_path);
-			return -EEXIST;
+			return 1;
 		}
 		curr=curr->next;
 	}
+	
+	spin_unlock(&config.lock);
 	
 	return 0;
 	
@@ -252,7 +256,7 @@ static bool should_block(const char *filename) {
 		return -EINVAL;
 	}
 	
-	if(config.rm_state!=OFF && config.rm_state!=REC_OFF){
+	if(config.rm_state!=ON && config.rm_state!=REC_ON){
 		return false;
 	}	
 	
@@ -262,42 +266,100 @@ static bool should_block(const char *filename) {
     return false;
 }
 
+//						di						si					dx					cx
+//int vfs_mkdir(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode)
 static int handler_pre_vfs_mkdir(struct kprobe *p, struct pt_regs *regs) {
-    struct dentry *dentry = (struct dentry *)regs->si;
+    struct dentry *dentry, *parent_dentry;
+    struct inode *inode;
     char buf[256];
+    char *name, *full_path, *directory;
 
-    // Recupera il nome della directory dal dentry
-    dentry_path_raw(dentry, buf, sizeof(buf));
+	char *parent_path;
+    
+    printk(KERN_INFO "%s: vfs_mkdir invocato\n", MOD_NAME);
 
-    printk(KERN_INFO "Attempt to create directory: %s\n", buf);
+	dentry= (struct dentry *) regs->dx;
+	//inode= (struct inode *) regs->di;
+
+    // Recupera il full path della directory dal dentry
+    name=dentry_path_raw(dentry, buf, sizeof(buf));
+
+	printk("name %s\n", name);
+
+    // Ottieni il dentry della directory parent
+    parent_dentry = dentry->d_parent;
+
+    // Recupera il percorso della directory parent
+    parent_path = dentry_path_raw(parent_dentry, buf, sizeof(buf));
+
+    if (IS_ERR(parent_path)) {
+        printk(KERN_ERR "Errore nel recuperare il percorso della cartella parent\n");
+        return -ENOENT;
+    }
+
+    printk(KERN_INFO "Percorso della cartella parent: %s\n", parent_path);
+
+ 	// Allocate buffer for full path
+    full_path = kmalloc(PATH_MAX, GFP_KERNEL);
+    if (!full_path) {
+        printk(KERN_ERR "Failed to allocate space for full path");
+        kfree(buf);
+        return -ENOMEM;
+    }
+
+    if (strncmp(name, "/", 1) == 0) {
+        snprintf(full_path, PATH_MAX, "%s", name);
+    }else{
+    // Combine the current directory path with the new directory name
+    snprintf(full_path, PATH_MAX, "%s/%s", name, dentry->d_name.name);
+	}
+
+	printk("dentry->d_name.name is %s", dentry->d_name.name);
+    printk("abs path is %s", full_path);
+
+    if (full_path == NULL) {
+        printk("abs path null");
+        kfree(buf);
+        kfree(full_path);
+        return -ENOMEM;
+    }
+
+    directory = full_path;
+
+    printk(KERN_INFO "Attempt to create directory: %s\n", directory);
 
     // Logica per decidere se bloccare l'operazione
-    if (should_block(buf)) {
-        printk(KERN_INFO "Blocking mkdir of directory: %s\n", buf);
+    /*if (should_block(parent_path)) {
+        printk(KERN_INFO "Blocking mkdir of directory: %s\n", directory);
         return -EPERM;
-    }
+    }*/
 
     return 0;
 }
 
+//							di						si					dx
+//int vfs_rmdir_raw(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry)
 static int handler_pre_vfs_rmdir(struct kprobe *p, struct pt_regs *regs) {
-    struct dentry *dentry = (struct dentry *)regs->si;
+    struct dentry *dentry = (struct dentry *)regs->dx;
     char buf[256];
+    char *name;
 
     // Recupera il nome della directory dal dentry
-    dentry_path_raw(dentry, buf, sizeof(buf));
+    name=dentry_path_raw(dentry, buf, sizeof(buf));
 
-    printk(KERN_INFO "Attempt to remove directory: %s\n", buf);
+    printk(KERN_INFO "Attempt to remove directory: %s\n", name);
 
     // Logica per decidere se bloccare l'operazione
-    if (should_block(buf)) {
-        printk(KERN_INFO "Blocking rmdir of directory: %s\n", buf);
+    /*if (should_block(name)) {
+        printk(KERN_INFO "Blocking rmdir of directory: %s\n", name);
         return -EPERM;
-    }
+    }*/
 
     return 0;
 }
 
+//						di				si	
+//int vfs_open(const struct path *, struct file *);
 static int handler_pre_vfs_open(struct kprobe *p, struct pt_regs *regs) {
     const struct path *path = (struct path *)regs->di;
     struct file *file = (struct file *)regs->si;
@@ -309,34 +371,39 @@ static int handler_pre_vfs_open(struct kprobe *p, struct pt_regs *regs) {
     name=dentry_path_raw(path->dentry, buf, sizeof(buf));
 
     printk("Attempt to open file: %s\n", name);
+    printk("f_flags: %d\n", file->f_flags);
+    printk("nome del file: %s\n", name);
 
     // Logica per decidere se bloccare l'operazione
-    if (file->f_flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC | O_APPEND)) {
-        if (should_block(buf)) {
+    /*if (file->f_flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC | O_APPEND)) {
+        if (should_block(name)) {
             printk(KERN_INFO "Blocking write access to file: %s, file: %s\n", buf, buf);
             return -EPERM;
         }
         printk("Aperto in scrittura: %s\n", name);
 
-    }
+    }*/
 
     return 0;
 }
 
+//							di					si				dx				cx
+//int vfs_unlink(struct user_namespace *, struct inode *, struct dentry *, struct inode **);
 static int handler_pre_vfs_unlink(struct kprobe *p, struct pt_regs *regs) {
     struct dentry *dentry = (struct dentry *)regs->dx;
     char buf[256];
+    char *name;
 
     // Recupera il nome del file dal dentry
-    dentry_path_raw(dentry, buf, sizeof(buf));
+    name=dentry_path_raw(dentry, buf, sizeof(buf));
 
-    printk(KERN_INFO "Attempt to unlink (delete) file: %s\n", buf);
+    printk(KERN_INFO "Attempt to unlink (delete) file: %s\n", name);
 
     // Logica per decidere se bloccare l'operazione
-    if (should_block(buf)) {
-        printk(KERN_INFO "Blocking unlink of file: %s\n", buf);
+    /*if (should_block(name)) {
+        printk(KERN_INFO "Blocking unlink of file: %s\n", name);
         return -EPERM;
-    }
+    }*/
 
     return 0;
 }
@@ -378,27 +445,35 @@ static int my_module_init(void) {
         return ret;
     }
 
+	ret = register_kprobe(&kp_vfs_unlink);
+    if (ret < 0) {
+        printk(KERN_INFO "register_kprobe vfs_unlink failed, returned %d\n", ret);
+        //unregister_kprobe(&kp_vfs_open);
+        return ret;
+    }
 
     ret = register_kprobe(&kp_vfs_mkdir);
     if (ret < 0) {
         printk(KERN_INFO "register_kprobe vfs_mkdir failed, returned %d\n", ret);
-        unregister_kprobe(&kp_vfs_open);
-        unregister_kprobe(&kp_vfs_unlink);
+        //unregister_kprobe(&kp_vfs_open);
+        //unregister_kprobe(&kp_vfs_unlink);
         return ret;
     }
 
     ret = register_kprobe(&kp_vfs_rmdir);
     if (ret < 0) {
         printk(KERN_INFO "register_kprobe vfs_rmdir failed, returned %d\n", ret);
-        unregister_kprobe(&kp_vfs_open);
-        unregister_kprobe(&kp_vfs_unlink);
-        unregister_kprobe(&kp_vfs_mkdir);
+        //unregister_kprobe(&kp_vfs_open);
+        //unregister_kprobe(&kp_vfs_unlink);
+        //unregister_kprobe(&kp_vfs_mkdir);
         return ret;
     }
 
     printk(KERN_INFO "kprobes registered\n");
 
     printk("%s: reference monitor module correctly loaded\n", MOD_NAME);
+    
+    printk(KERN_INFO "%s: prova get_abs %s ciao\n", MOD_NAME, get_absolute_path("utils.h"));
     
     // Registra la kprobe
     // Inizializzare deferred workqueue

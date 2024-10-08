@@ -13,45 +13,44 @@
  */
 char *get_absolute_path(const char *filename)
 {
-    struct path path;
-    char *absolute_path;
-    char *tmp;
-    int len;
-    int err;
+	struct path path;
+	char *absolute_path;
+	char *tmp;
+	int len;
+	int err;
 
-	printk("filename: %s\n", filename);
 
-    if (!filename){
-    	printk(KERN_ERR "empty filename passato\n");
-        return NULL;
-    }
+	if (!filename){
+		printk(KERN_ERR "empty filename passato\n");
+		return NULL;
+	}
 
-    // Risolvi il percorso del file passato come stringa
-    err = kern_path(filename, LOOKUP_FOLLOW, &path);
-    if (err){
-    	printk(KERN_ERR "errore in kern_path %int\n", err);
-        return NULL;
-    }
+	// Risolvi il percorso del file passato come stringa
+	err = kern_path(filename, LOOKUP_FOLLOW, &path);
+	if (err){
+		printk(KERN_ERR "errore in kern_path %int\n", err);
+		return NULL;
+	}
 
-    // Allocazione temporanea per il percorso
-    tmp = (char *)kmalloc(PATH_MAX, GFP_KERNEL);
-    if (!tmp) {
-    	printk(KERN_ERR "errore nell'allocazione della memoria per tmp\n");
-        path_put(&path);  // Libera risorse se l'allocazione fallisce
-        return NULL;
-    }
+	// Allocazione temporanea per il percorso
+	tmp = (char *)kmalloc(PATH_MAX, GFP_KERNEL);
+	if (!tmp) {
+		printk(KERN_ERR "errore nell'allocazione della memoria per tmp\n");
+		path_put(&path);  // Libera risorse se l'allocazione fallisce
+		return NULL;
+	}
 
-    // Ottieni il percorso assoluto
-    absolute_path = d_path(&path, tmp, PATH_MAX);
-    path_put(&path);  // Libera risorse per il path
+	// Ottieni il percorso assoluto
+	absolute_path = d_path(&path, tmp, PATH_MAX);
+	path_put(&path);  // Libera risorse per il path
 
-    if (IS_ERR(absolute_path)) {
-    	printk(KERN_ERR "errore d_path\n");
-        kfree(tmp);  // Libera la memoria in caso di errore
-        return NULL;
-    }
+	if (IS_ERR(absolute_path)) {
+ 		printk(KERN_ERR "errore d_path\n");
+		kfree(tmp);  // Libera la memoria in caso di errore
+		return NULL;
+	}
 
 	printk(KERN_INFO "path: %s", absolute_path);
     
-    return absolute_path;  // Ritorna il percorso assoluto
+	return absolute_path;  // Ritorna il percorso assoluto
 }
