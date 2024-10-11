@@ -9,6 +9,9 @@
 #include <linux/ptrace.h>       
 #include <linux/syscalls.h>
 #include <linux/version.h>
+#include <linux/fs.h>
+#include <linux/dcache.h>
+
 
 #include "constants.h"
 #include "sha256.h"
@@ -38,8 +41,15 @@ typedef struct reference_monitor_config {
     rm_state rm_state;                      // Stato corrente reference monitor
     u8 password[PASSWORD_HASH_SIZE];		// Password per riconfigurare il reference monitor
     path_node *head;     					// Lista path non accessibili in scrittura
-    spinlock_t lock;
 } rm_config;
+
+struct open_flags {
+	int open_flag;
+	umode_t mode;
+	int acc_mode;
+	int intent;
+	int lookup_flags;
+};
 
 
 
@@ -49,13 +59,13 @@ static int rm_open(struct inode *inode, struct file *filp);
 
 static ssize_t rm_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
 
-static int handler_pre_vfs_open(struct kprobe *p, struct pt_regs *regs);
-
-static int handler_pre_vfs_unlink(struct kprobe *p, struct pt_regs *regs);
+static int handler_pre_do_filp_open(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 static int handler_pre_vfs_mkdir(struct kprobe *p, struct pt_regs *regs);
 
-static int handler_pre_vfs_rmdir(struct kprobe *p, struct pt_regs *regs);
+static int handler_pre_rm(struct kretprobe_instance *kp, struct pt_regs *regs);
+
+static int post_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 static spinlock_t RM_lock;
 
@@ -65,14 +75,22 @@ struct file_operations my_fops = {
     .write = rm_write,
 };
 
-static struct kprobe kp_vfs_open = {
-    .symbol_name=VFS_OPEN,
-    .pre_handler= handler_pre_vfs_open,
+struct kretprobe_data {
+    int block_flag; // Flag per indicare se l'operazione deve essere bloccata
 };
 
-static struct kprobe kp_vfs_rmdir = {
-    .symbol_name=VFS_RMDIR,
-    .pre_handler= handler_pre_vfs_rmdir,
+static struct kretprobe kp_do_filp_open = {
+    .kp.symbol_name=DO_FILP_OPEN,
+    .data_size = sizeof(struct kretprobe_data), // Dimensione dei dati
+    .entry_handler= handler_pre_do_filp_open,
+    .handler=post_handler
+};
+
+static struct kretprobe kp_vfs_rmdir = {
+    .kp.symbol_name=VFS_RMDIR,
+    .data_size = sizeof(struct kretprobe_data), // Dimensione dei dati
+    .entry_handler=handler_pre_rm,
+    .handler=post_handler
 };
 
 static struct kprobe kp_vfs_mkdir = {
@@ -80,9 +98,11 @@ static struct kprobe kp_vfs_mkdir = {
     .pre_handler= handler_pre_vfs_mkdir,
 };
 
-static struct kprobe kp_vfs_unlink = {
-    .symbol_name=VFS_UNLINK,
-    .pre_handler= handler_pre_vfs_unlink,
+static struct kretprobe kp_vfs_unlink = {
+    .kp.symbol_name = DO_UNLINKAT,
+    .data_size = sizeof(struct kretprobe_data), // Dimensione dei dati
+    .entry_handler=handler_pre_rm,
+    .handler=post_handler
 };
 
 static rm_config config;
@@ -119,26 +139,38 @@ int rm_rec_off(void){
 }
 
 void change_rm_state(rm_state state){
+    rm_state current_state;
     
-    rm_state current_state=config.rm_state;
-
     printk("%s: changing reference monitor state\n", MOD_NAME);
+
+	spin_lock(&RM_lock);	
+	
+	current_state=config.rm_state;
 
     printk("%s: initial state is %d\n", MOD_NAME, current_state);
 
-    if((current_state==OFF || current_state==REC_OFF) && (current_state==ON || current_state==REC_ON)){
+    if((current_state==OFF || current_state==REC_OFF) && (state==ON || state==REC_ON)){
 
         //TODO: attivare il rm
+        enable_kretprobe(&kp_do_filp_open);
+		enable_kretprobe(&kp_vfs_unlink);
+		enable_kprobe(&kp_vfs_mkdir);
+		enable_kretprobe(&kp_vfs_rmdir);
 
-    }else if ((current_state==ON || current_state==REC_ON) && (current_state==OFF || current_state==REC_OFF)){
+    }else if ((current_state==ON || current_state==REC_ON) && (state==OFF || state==REC_OFF)){
 
         //TODO: disattivare il rm
+        /*disable_kretprobe(&kp_do_filp_open);
+    	disable_kretprobe(&kp_vfs_unlink);
+    	disable_kprobe(&kp_vfs_mkdir);
+    	disable_kretprobe(&kp_vfs_rmdir);*/
 
     }
 
     config.rm_state=state;
 
     printk("%s: new state is %d\n", MOD_NAME, config.rm_state);
+    spin_unlock(&RM_lock);
 
     return;
 }
@@ -153,21 +185,21 @@ static ssize_t rm_write(struct file *filp, const char __user *buf, size_t count,
     return 0;
 }
 
-//controllo se nella lista è già presente un path
+//controllo se nella lista è già presente il path passato in input
 int check_list(char *abs_path){
 	path_node *curr=config.head;
+
+	printk("entrato in check_list");
 	
-	spin_lock(&config.lock);
-	
+	//scorro la lista di percorsi bloccati per vedere se è presente il path passato in input	
 	while(curr){
+		printk("path: %s abs_path: %s head: %s\n", curr->path, abs_path, config.head->path);
 		if(strcmp(curr->path, abs_path)==0){
 			printk(KERN_INFO "Path already exist %s\n", abs_path);
 			return 1;
 		}
 		curr=curr->next;
 	}
-	
-	spin_unlock(&config.lock);
 	
 	return 0;
 	
@@ -195,10 +227,11 @@ int add_path(char *path){
 		return -EINVAL;
 	}*/
 	
-	spin_lock(&config.lock);
+	spin_lock(&RM_lock);
 	
-	if(!(res=check_list(path))){
-		kfree(abs_path);
+	if((res=check_list(path))){
+		printk("path già presente %d\n", res);
+		spin_unlock(&RM_lock);
 		return res;
 	}
 	
@@ -206,19 +239,18 @@ int add_path(char *path){
     new_node = kmalloc(sizeof(struct path_node), GFP_KERNEL);
     if (!new_node) {
         printk(KERN_ERR "Failed to allocate memory for new node\n");
-        spin_unlock(&config.lock);
-        kfree(abs_path);
+        spin_unlock(&RM_lock);
         return -ENOMEM;
     }
-    new_node->path = abs_path; 
+    //new_node->path = abs_path;
+    new_node->path= kmalloc(strlen(abs_path)+1, GFP_KERNEL);
+    strncpy(new_node->path, abs_path, strlen(abs_path)+1);
     new_node->next = config.head;
     config.head = new_node;
 
-    spin_unlock(&config.lock);
+    spin_unlock(&RM_lock);
 
     printk(KERN_INFO "Path inserted: %s\n", abs_path);
-    
-    kfree(abs_path);
 
     return 0;
 	
@@ -247,23 +279,19 @@ int change_password(char *new_password){
     
 }
 
-// Funzione di esempio per decidere se bloccare l'operazione
-static bool should_block(const char *filename) {
-	char *abs_path=get_absolute_path(filename);		//convert path to absolute path
+static int post_handler(struct kretprobe_instance *kp, struct pt_regs *regs){
+	struct kretprobe_data *data;
+	data = (struct kretprobe_data *)kp->data;
 
-	if(!abs_path){
-		printk(KERN_ERR "%s: could not resolve absolute path\n", MOD_NAME);
-		return -EINVAL;
-	}
-	
-	if(config.rm_state!=ON && config.rm_state!=REC_ON){
-		return false;
-	}	
-	
-    if (check_list(abs_path)) {
-        return true;
+	if (data->block_flag) {
+        // Imposta il codice di errore per bloccare l'operazione
+        regs->ax = -EACCES;
+        data->block_flag = 0; // Reset del flag
+        printk(KERN_INFO "%s: Operation blocked by kretprobe\n",MOD_NAME);
     }
-    return false;
+
+
+	return 0;
 }
 
 //						di						si					dx					cx
@@ -271,7 +299,7 @@ static bool should_block(const char *filename) {
 static int handler_pre_vfs_mkdir(struct kprobe *p, struct pt_regs *regs) {
     struct dentry *dentry, *parent_dentry;
     struct inode *inode;
-    char buf[256];
+    char *buf;
     char *name, *full_path, *directory;
 
 	char *parent_path;
@@ -281,16 +309,27 @@ static int handler_pre_vfs_mkdir(struct kprobe *p, struct pt_regs *regs) {
 	dentry= (struct dentry *) regs->dx;
 	//inode= (struct inode *) regs->di;
 
-    // Recupera il full path della directory dal dentry
-    name=dentry_path_raw(dentry, buf, sizeof(buf));
+	buf = kmalloc(PATH_MAX, GFP_KERNEL);
+    if (!buf) {
+        printk(KERN_ERR "Failed to allocate space for buffer");
+        return -ENOMEM;
+    }
 
+    // Recupera il full path della directory dal dentry
+    name=dentry_path_raw(dentry, buf, PATH_MAX);
+	if (IS_ERR(name)) {
+        printk(KERN_ERR "Failed to get dentry path");
+        kfree(buf);
+        return PTR_ERR(name);
+    }
+    
 	printk("name %s\n", name);
 
     // Ottieni il dentry della directory parent
     parent_dentry = dentry->d_parent;
 
     // Recupera il percorso della directory parent
-    parent_path = dentry_path_raw(parent_dentry, buf, sizeof(buf));
+    parent_path = dentry_path_raw(parent_dentry, buf, MAX_LEN);
 
     if (IS_ERR(parent_path)) {
         printk(KERN_ERR "Errore nel recuperare il percorso della cartella parent\n");
@@ -333,78 +372,149 @@ static int handler_pre_vfs_mkdir(struct kprobe *p, struct pt_regs *regs) {
         printk(KERN_INFO "Blocking mkdir of directory: %s\n", directory);
         return -EPERM;
     }*/
-
+    
+    kfree(buf);
     return 0;
 }
 
-//							di						si					dx
-//int vfs_rmdir_raw(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry)
-static int handler_pre_vfs_rmdir(struct kprobe *p, struct pt_regs *regs) {
-    struct dentry *dentry = (struct dentry *)regs->dx;
-    char buf[256];
-    char *name;
-
-    // Recupera il nome della directory dal dentry
-    name=dentry_path_raw(dentry, buf, sizeof(buf));
-
-    printk(KERN_INFO "Attempt to remove directory: %s\n", name);
+/* struct open_flags {
+	int open_flag;
+	umode_t mode;
+	int acc_mode;
+	int intent;
+	int lookup_flags;
+};*/
+/* struct filename {
+	const char		*name;	// pointer to actual string 
+	const __user char	*uptr;	// original userland pointer
+	int			refcnt;
+	struct audit_names	*aname;
+	const char		iname[];
+};*/
+//								di				si						dx
+// struct file *do_filp_open(int dfd, struct filename *pathname, const struct open_flags *op);
+//uso la do_filp_open perché quando vfs_open utilizzato il file già potrebbe essere stato creato
+static int handler_pre_do_filp_open(struct kretprobe_instance *kp, struct pt_regs *regs) {
+    int fd;
+    struct open_flags *op;
+    const char *path_kernel, *path_user;
+    char *directory, *parent;
+    int flags;
+    
+    struct kretprobe_data *data;
+	data  = (struct kretprobe_data *)kp->data;
+    
+    fd=regs->di;
+    op=(struct open_flags *)(regs->dx);
+    flags=op->open_flag;
+    path_kernel = ((struct filename *)(regs->si))->name;
+    path_user = ((struct filename *)(regs->si))->uptr;
+    
+    if(strncmp(path_kernel, "/run", 4) == 0) {
+    	return 0;
+    }
+    
+    directory=get_absolute_path(path_kernel);
+    printk("user path: %s\n", path_kernel);
+    printk("user path: %s\n", directory);
 
     // Logica per decidere se bloccare l'operazione
-    /*if (should_block(name)) {
-        printk(KERN_INFO "Blocking rmdir of directory: %s\n", name);
-        return -EPERM;
-    }*/
+    
+    //se il file è aperto in lettura, ritorno 	
+	if(!(flags & O_RDWR) && !(flags & O_WRONLY) && !(flags & (O_CREAT | __O_TMPFILE | O_EXCL )))  return 0;
 
+	if(flags & O_CREAT){
+		printk("creazione %s\n", directory);
+		if (directory == NULL) { /*se sto creando un file (quindi abs_path nullo) */
+            	// Recupera il percorso della directory genitore del file
+            	parent = get_dir_parent((char *)path_kernel);
+
+            	// Recupera il percorso assoluto della directory genitore
+            	directory = get_absolute_path(parent);
+
+            	// Usa il percorso assoluto della directory genitore se è valido
+            	if (directory == NULL) {
+                	// Se il percorso assoluto non è valido, usa la directory corrente come fallback
+               		directory = get_cwd();
+            	}
+		}
+	}
+	
+	spin_lock(&RM_lock);
+	
+	while (directory && *directory && strcmp(directory, " ") != 0){ //controllo che sia non NULL e non vuoto.
+	
+		printk("Entrato");
+		if(check_list(directory)){
+			data->block_flag=1;
+			printk(KERN_INFO "Bloccata scrittura su file vietato %s.\n", directory);
+			op->open_flag = O_RDONLY;
+			spin_unlock(&RM_lock);
+            return 0;
+		}
+        printk("dir %s\n", directory);
+		directory = get_dir_parent(directory); //itero sui parent della directory passata
+	}
+
+	spin_unlock(&RM_lock);
     return 0;
 }
 
-//						di				si	
-//int vfs_open(const struct path *, struct file *);
-static int handler_pre_vfs_open(struct kprobe *p, struct pt_regs *regs) {
-    const struct path *path = (struct path *)regs->di;
-    struct file *file = (struct file *)regs->si;
-    char buf[256];
+// si: struct inode*
+// dx: struct dentry *
+static int handler_pre_rm(struct kretprobe_instance *kp, struct pt_regs *regs) {
+    struct dentry *dentry;
+    char *buf;
+    char *name, *directory;
+    struct kretprobe_data *data;
 
-    char *name;
+	data  = (struct kretprobe_data *)kp->data;
+	dentry = (struct dentry *)regs->dx;
 
-    // Recupera il nome del file dal dentry
-    name=dentry_path_raw(path->dentry, buf, sizeof(buf));
+	name = (char *)((struct filename *)(regs->si))->name;
 
-    printk("Attempt to open file: %s\n", name);
-    printk("f_flags: %d\n", file->f_flags);
-    printk("nome del file: %s\n", name);
+    if (IS_ERR(name)) {
+        pr_err(KERN_ERR "%s:Errore nell'ottenere il nome del file\n", MOD_NAME);
+        return 0;
+    }
+    
+    printk(KERN_INFO "%s: Attempt to remove file/directory: %s\n", MOD_NAME, name);
+    
+	//se temp-file nop
+	if(temp_file(name)){
+        kfree(buf);
+		return 0;
+	}
+	
+	//percorso assoluto
+	directory=get_absolute_path(name);
+	if(!directory){
+		return 0;
+	}
+    
+	//controlla se path presente nella lista dei file bloccati
+	spin_lock(&RM_lock);
+    while (directory != NULL && strcmp(directory, "") != 0 && strcmp(directory, " ") != 0) {
 
-    // Logica per decidere se bloccare l'operazione
-    /*if (file->f_flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC | O_APPEND)) {
-        if (should_block(name)) {
-            printk(KERN_INFO "Blocking write access to file: %s, file: %s\n", buf, buf);
-            return -EPERM;
+        if (check_list(directory)) {
+
+			data->block_flag=1; //flag per bloccare l'operazione
+            printk(KERN_ERR "%s: path or its parent directory is in blacklist: %s\n",MOD_NAME, directory);
+            
+            // Blocca l'operazione modificando il valore dei registri
+			regs->ax = -EPERM;
+			regs->di = (unsigned long)NULL;
+
+
+            printk(KERN_ERR "%s: rmdir/unlinkat operation was blocked: %s\n",MOD_NAME, name);
+			spin_unlock(&RM_lock);
+            return 0;
         }
-        printk("Aperto in scrittura: %s\n", name);
 
-    }*/
-
-    return 0;
-}
-
-//							di					si				dx				cx
-//int vfs_unlink(struct user_namespace *, struct inode *, struct dentry *, struct inode **);
-static int handler_pre_vfs_unlink(struct kprobe *p, struct pt_regs *regs) {
-    struct dentry *dentry = (struct dentry *)regs->dx;
-    char buf[256];
-    char *name;
-
-    // Recupera il nome del file dal dentry
-    name=dentry_path_raw(dentry, buf, sizeof(buf));
-
-    printk(KERN_INFO "Attempt to unlink (delete) file: %s\n", name);
-
-    // Logica per decidere se bloccare l'operazione
-    /*if (should_block(name)) {
-        printk(KERN_INFO "Blocking unlink of file: %s\n", name);
-        return -EPERM;
-    }*/
-
+        // Ottieni la directory genitore
+        directory = get_dir_parent(directory);
+    }
+	spin_unlock(&RM_lock);
     return 0;
 }
 
@@ -432,42 +542,45 @@ static int my_module_init(void) {
 
     print_hash(config.password);
 
-    rm_off();
+    rm_rec_off();
     
+    add_path("/home/vboxuser/Scrivania/prova");
+    
+    printk("curr_node %s\n", config.head->path);
     if(verify_password("password1", strlen("password1"), config.password)){
     	printk(KERN_INFO "la password corrisponde");
     }
     
 
-    ret = register_kprobe(&kp_vfs_open);
+    ret = register_kretprobe(&kp_do_filp_open);
     if (ret < 0) {
-        printk(KERN_INFO "register_kprobe vfs_open failed, returned %d\n", ret);
+        printk(KERN_INFO "register_kprobe do_filp_open failed, returned %d\n", ret);
         return ret;
     }
 
-	ret = register_kprobe(&kp_vfs_unlink);
+	ret = register_kretprobe(&kp_vfs_unlink);
     if (ret < 0) {
         printk(KERN_INFO "register_kprobe vfs_unlink failed, returned %d\n", ret);
-        //unregister_kprobe(&kp_vfs_open);
+        unregister_kretprobe(&kp_do_filp_open);
         return ret;
     }
 
     ret = register_kprobe(&kp_vfs_mkdir);
     if (ret < 0) {
         printk(KERN_INFO "register_kprobe vfs_mkdir failed, returned %d\n", ret);
-        //unregister_kprobe(&kp_vfs_open);
-        //unregister_kprobe(&kp_vfs_unlink);
+        unregister_kretprobe(&kp_do_filp_open);
+        unregister_kprobe(&kp_vfs_unlink);
         return ret;
     }
 
-    ret = register_kprobe(&kp_vfs_rmdir);
+    /*ret = register_kretprobe(&kp_vfs_rmdir);
     if (ret < 0) {
         printk(KERN_INFO "register_kprobe vfs_rmdir failed, returned %d\n", ret);
-        //unregister_kprobe(&kp_vfs_open);
-        //unregister_kprobe(&kp_vfs_unlink);
-        //unregister_kprobe(&kp_vfs_mkdir);
+        unregister_kretprobe(&kp_do_filp_open);
+        unregister_kprobe(&kp_vfs_unlink);
+        unregister_kprobe(&kp_vfs_mkdir);
         return ret;
-    }
+    }*/
 
     printk(KERN_INFO "kprobes registered\n");
 
@@ -483,12 +596,15 @@ static int my_module_init(void) {
 
 static void my_module_exit(void) {
 
-    unregister_kprobe(&kp_vfs_open);
-    unregister_kprobe(&kp_vfs_unlink);
-    unregister_kprobe(&kp_vfs_mkdir);
-    unregister_kprobe(&kp_vfs_rmdir);
+    unregister_kretprobe(&kp_do_filp_open);
+    unregister_kretprobe(&kp_vfs_unlink);
+    /*unregister_kprobe(&kp_vfs_mkdir);
+    unregister_kretprobe(&kp_vfs_rmdir);*/
 
     printk("%s: reference monitor module unloaded\n", MOD_NAME);
+    
+    unregister_chrdev(major, DEV_NAME);
+	printk(KERN_INFO "%s: device unregistered, it was assigned major number %d\n",DEV_NAME,major);
     
 }
 
