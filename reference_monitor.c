@@ -61,7 +61,7 @@ static ssize_t rm_write(struct file *filp, const char __user *buf, size_t count,
 
 static int handler_pre_do_filp_open(struct kretprobe_instance *kp, struct pt_regs *regs);
 
-static int handler_pre_vfs_mkdir(struct kprobe *p, struct pt_regs *regs);
+static int handler_pre_do_mkdirat(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 static int handler_pre_rm(struct kretprobe_instance *kp, struct pt_regs *regs);
 
@@ -86,19 +86,21 @@ static struct kretprobe kp_do_filp_open = {
     .handler=post_handler
 };
 
-static struct kretprobe kp_vfs_rmdir = {
-    .kp.symbol_name=VFS_RMDIR,
+static struct kretprobe kp_do_rmdir = {
+    .kp.symbol_name=DO_RMDIR,
     .data_size = sizeof(struct kretprobe_data), // Dimensione dei dati
     .entry_handler=handler_pre_rm,
     .handler=post_handler
 };
 
-static struct kprobe kp_vfs_mkdir = {
-    .symbol_name=VFS_MKDIR,
-    .pre_handler= handler_pre_vfs_mkdir,
+static struct kretprobe kp_do_mkdir = {
+    .kp.symbol_name=DO_MKDIRAT,
+    .data_size = sizeof(struct kretprobe_data), // Dimensione dei dati
+    .entry_handler= handler_pre_do_mkdirat,
+    .handler=post_handler
 };
 
-static struct kretprobe kp_vfs_unlink = {
+static struct kretprobe kp_do_unlinkat = {
     .kp.symbol_name = DO_UNLINKAT,
     .data_size = sizeof(struct kretprobe_data), // Dimensione dei dati
     .entry_handler=handler_pre_rm,
@@ -153,17 +155,17 @@ void change_rm_state(rm_state state){
 
         //TODO: attivare il rm
         enable_kretprobe(&kp_do_filp_open);
-		enable_kretprobe(&kp_vfs_unlink);
-		enable_kprobe(&kp_vfs_mkdir);
-		enable_kretprobe(&kp_vfs_rmdir);
+		enable_kretprobe(&kp_do_unlinkat);
+		enable_kretprobe(&kp_do_mkdir);
+		enable_kretprobe(&kp_do_rmdir);
 
     }else if ((current_state==ON || current_state==REC_ON) && (state==OFF || state==REC_OFF)){
 
         //TODO: disattivare il rm
         /*disable_kretprobe(&kp_do_filp_open);
-    	disable_kretprobe(&kp_vfs_unlink);
-    	disable_kprobe(&kp_vfs_mkdir);
-    	disable_kretprobe(&kp_vfs_rmdir);*/
+    	disable_kretprobe(&kp_do_unlinkat);
+    	disable_kretprobe(&kp_do_mkdir);
+    	disable_kretprobe(&kp_do_rmdir);*/
 
     }
 
@@ -296,84 +298,66 @@ static int post_handler(struct kretprobe_instance *kp, struct pt_regs *regs){
 
 //						di						si					dx					cx
 //int vfs_mkdir(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode)
-static int handler_pre_vfs_mkdir(struct kprobe *p, struct pt_regs *regs) {
+static int handler_pre_do_mkdirat(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct dentry *dentry, *parent_dentry;
     struct inode *inode;
     char *buf;
-    char *name, *full_path, *directory;
-
-	char *parent_path;
+    char *name, *parent, *directory;
     
-    printk(KERN_INFO "%s: vfs_mkdir invocato\n", MOD_NAME);
+    struct kretprobe_data *data;
+	data  = (struct kretprobe_data *)kp->data;
+    
+    name = (char *)((struct filename *)(regs->si))->name;
 
-	dentry= (struct dentry *) regs->dx;
-	//inode= (struct inode *) regs->di;
-
-	buf = kmalloc(PATH_MAX, GFP_KERNEL);
-    if (!buf) {
-        printk(KERN_ERR "Failed to allocate space for buffer");
-        return -ENOMEM;
-    }
-
-    // Recupera il full path della directory dal dentry
-    name=dentry_path_raw(dentry, buf, PATH_MAX);
-	if (IS_ERR(name)) {
-        printk(KERN_ERR "Failed to get dentry path");
-        kfree(buf);
-        return PTR_ERR(name);
+    if (IS_ERR(name)) {
+        pr_err(KERN_ERR "%s: Error in get filename\n",MOD_NAME);
+        return 0;
     }
     
-	printk("name %s\n", name);
-
-    // Ottieni il dentry della directory parent
-    parent_dentry = dentry->d_parent;
-
-    // Recupera il percorso della directory parent
-    parent_path = dentry_path_raw(parent_dentry, buf, MAX_LEN);
-
-    if (IS_ERR(parent_path)) {
-        printk(KERN_ERR "Errore nel recuperare il percorso della cartella parent\n");
-        return -ENOENT;
+    if (temp_file(name)) {
+        return 0;
     }
+    
+    directory=get_absolute_path(name);
+    printk("creazione %s\n", directory);
+	if (directory == NULL) { /*se sto creando un file (quindi abs_path nullo) */
+        	// Recupera il percorso della directory genitore del file
+        	parent = get_dir_parent((char *)name);
 
-    printk(KERN_INFO "Percorso della cartella parent: %s\n", parent_path);
+        	// Recupera il percorso assoluto della directory genitore
+        	directory = get_absolute_path(parent);
 
- 	// Allocate buffer for full path
-    full_path = kmalloc(PATH_MAX, GFP_KERNEL);
-    if (!full_path) {
-        printk(KERN_ERR "Failed to allocate space for full path");
-        kfree(buf);
-        return -ENOMEM;
-    }
-
-    if (strncmp(name, "/", 1) == 0) {
-        snprintf(full_path, PATH_MAX, "%s", name);
-    }else{
-    // Combine the current directory path with the new directory name
-    snprintf(full_path, PATH_MAX, "%s/%s", name, dentry->d_name.name);
+        	// Usa il percorso assoluto della directory genitore se è valido
+        	if (directory == NULL) {
+            	// Se il percorso assoluto non è valido, usa la directory corrente come fallback
+           		directory = get_cwd();
+        	}
 	}
-
-	printk("dentry->d_name.name is %s", dentry->d_name.name);
-    printk("abs path is %s", full_path);
-
-    if (full_path == NULL) {
-        printk("abs path null");
-        kfree(buf);
-        kfree(full_path);
-        return -ENOMEM;
-    }
-
-    directory = full_path;
 
     printk(KERN_INFO "Attempt to create directory: %s\n", directory);
 
-    // Logica per decidere se bloccare l'operazione
-    /*if (should_block(parent_path)) {
-        printk(KERN_INFO "Blocking mkdir of directory: %s\n", directory);
-        return -EPERM;
-    }*/
-    
-    kfree(buf);
+    spin_lock(&RM_lock);
+    while (directory != NULL && strcmp(directory, "") != 0 && strcmp(directory, " ") != 0) {
+
+        if (check_list(directory)) {
+
+			data->block_flag=1; //flag per bloccare l'operazione
+            printk(KERN_ERR "%s: path or its parent directory is in blacklist: %s\n",MOD_NAME, directory);
+            
+            // Blocca l'operazione modificando il valore dei registri
+			regs->ax = -EPERM;
+			regs->di = (unsigned long)NULL;
+
+
+            printk(KERN_ERR "%s: mkdir operation was blocked: %s\n",MOD_NAME, name);
+			spin_unlock(&RM_lock);
+            return 0;
+        }
+
+        // Ottieni la directory genitore
+        directory = get_dir_parent(directory);
+    }
+	spin_unlock(&RM_lock);
     return 0;
 }
 
@@ -558,29 +542,29 @@ static int my_module_init(void) {
         return ret;
     }
 
-	ret = register_kretprobe(&kp_vfs_unlink);
+	ret = register_kretprobe(&kp_do_unlinkat);
     if (ret < 0) {
         printk(KERN_INFO "register_kprobe vfs_unlink failed, returned %d\n", ret);
         unregister_kretprobe(&kp_do_filp_open);
         return ret;
     }
 
-    ret = register_kprobe(&kp_vfs_mkdir);
+    ret = register_kretprobe(&kp_do_mkdir);
     if (ret < 0) {
         printk(KERN_INFO "register_kprobe vfs_mkdir failed, returned %d\n", ret);
         unregister_kretprobe(&kp_do_filp_open);
-        unregister_kprobe(&kp_vfs_unlink);
+        unregister_kretprobe(&kp_do_unlinkat);
         return ret;
     }
 
-    /*ret = register_kretprobe(&kp_vfs_rmdir);
+    ret = register_kretprobe(&kp_do_rmdir);
     if (ret < 0) {
         printk(KERN_INFO "register_kprobe vfs_rmdir failed, returned %d\n", ret);
         unregister_kretprobe(&kp_do_filp_open);
-        unregister_kprobe(&kp_vfs_unlink);
-        unregister_kprobe(&kp_vfs_mkdir);
+        unregister_kretprobe(&kp_do_unlinkat);
+        unregister_kretprobe(&kp_do_mkdir);
         return ret;
-    }*/
+    }
 
     printk(KERN_INFO "kprobes registered\n");
 
@@ -597,9 +581,9 @@ static int my_module_init(void) {
 static void my_module_exit(void) {
 
     unregister_kretprobe(&kp_do_filp_open);
-    unregister_kretprobe(&kp_vfs_unlink);
-    /*unregister_kprobe(&kp_vfs_mkdir);
-    unregister_kretprobe(&kp_vfs_rmdir);*/
+    unregister_kretprobe(&kp_do_unlinkat);
+    unregister_kretprobe(&kp_do_mkdir);
+    unregister_kretprobe(&kp_do_rmdir);
 
     printk("%s: reference monitor module unloaded\n", MOD_NAME);
     

@@ -6,9 +6,8 @@
 #define DEV_NAME "/dev/reference_monitor"
 
 #define DO_FILP_OPEN "do_filp_open"
-#define VFS_RMDIR "vfs_rmdir"
-#define VFS_MKDIR "vfs_mkdir"
-#define VFS_UNLINK "vfs_unlink"
+#define DO_RMDIR "do_rmdir"
+#define DO_MKDIRAT "do_mkdirat"
 #define DO_UNLINKAT "do_unlinkat"
 
 #define PASSWORD_HASH_SIZE 32
