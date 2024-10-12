@@ -28,4 +28,6 @@ extern rm_config config;
 
 extern char *the_file;
 
+extern spinlock_t RM_lock;
+
 #endif

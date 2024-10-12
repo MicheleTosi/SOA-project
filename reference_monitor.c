@@ -29,6 +29,8 @@ MODULE_PARM_DESC(the_file, "Path to the log file");
 
 static int major;
 
+spinlock_t RM_lock;
+
 static int rm_open(struct inode *inode, struct file *filp);
 
 static ssize_t rm_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);

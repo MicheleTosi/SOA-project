@@ -3,6 +3,8 @@
 
 #include "../utils/utils.h"
 #include "../utils/constants.h"
+#include "../task/tasks.h"
+#include "../reference_monitor.h"
 #include "probes.h"
 
 
@@ -23,12 +25,12 @@ static int post_handler(struct kretprobe_instance *kp, struct pt_regs *regs){
 	data = (struct kretprobe_data *)kp->data;
 
 	if (data->block_flag) {
+		schedule_deferred_work();
         // Imposta il codice di errore per bloccare l'operazione
         regs->ax = -EACCES;
         data->block_flag = 0; // Reset del flag
         printk(KERN_INFO "%s: Operation blocked by kretprobe\n",MOD_NAME);
     }
-
 
 	return 0;
 }

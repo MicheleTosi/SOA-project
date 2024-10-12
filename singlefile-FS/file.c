@@ -11,7 +11,7 @@
 
 #include "singlefilefs.h"
 
-//static struct mutex lock_log;
+static struct mutex lock_log;
 
 ssize_t onefilefs_write_iter(struct kiocb *iocb, struct iov_iter *from){
 	
@@ -26,9 +26,9 @@ ssize_t onefilefs_write_iter(struct kiocb *iocb, struct iov_iter *from){
 	loff_t offset;							// offset nel blocco corrente
 	loff_t append_offset;					// offset da cui iniziare la scrittura
 	
-	//mutex_lock(&lock_log);
+	mutex_lock(&lock_log);
 	//mutex_lock(&the_inode->i_mutex);
-	down_write(&the_inode->i_rwsem);
+	//down_write(&the_inode->i_rwsem);
 	
 	append_offset= i_size_read(the_inode);	// offset da cui deve iniziare la scrittura
 	
@@ -43,9 +43,9 @@ ssize_t onefilefs_write_iter(struct kiocb *iocb, struct iov_iter *from){
 	// carico il blocco specifico nel buffer
 	bh = (struct buffer_head *)sb_bread(filp->f_path.dentry->d_inode->i_sb, block_to_write);
     if(!bh){
-    	//mutex_unlock(&lock_log);
+    	mutex_unlock(&lock_log);
 		//mutex_unlock(&the_inode->i_mutex);
-		up_write(&the_inode->i_rwsem);
+		//up_write(&the_inode->i_rwsem);
 		return -EIO;
     }
     
@@ -59,9 +59,9 @@ ssize_t onefilefs_write_iter(struct kiocb *iocb, struct iov_iter *from){
  	the_inode->i_size = append_offset;			// nuovo offset
  	i_size_write(the_inode, append_offset);			// aggiornamento dimensione
  	brelse(bh);									// rilascio buffer
- 	//mutex_unlock(&lock_log);
+ 	mutex_unlock(&lock_log);
  	//mutex_unlock(&the_inode->i_mutex);
- 	up_write(&the_inode->i_rwsem);
+ 	//up_write(&the_inode->i_rwsem);
  	
  	return len;
 	
@@ -82,13 +82,13 @@ ssize_t onefilefs_read(struct file * filp, char __user * buf, size_t len, loff_t
     //this operation is not synchronized 
     //*off can be changed concurrently 
     //add synchronization if you need it for any reason
-	//mutex_lock(&lock_log);
-	down_write(&the_inode->i_rwsem);
+	mutex_lock(&lock_log);
+	//down_write(&the_inode->i_rwsem);
 
     //check that *off is within boundaries
     if (*off >= file_size){
-    	//mutex_unlock(&lock_log);
-        up_write(&the_inode->i_rwsem);
+    	mutex_unlock(&lock_log);
+        //up_write(&the_inode->i_rwsem);
         return 0;
     }
     else if (*off + len > file_size)
@@ -107,15 +107,15 @@ ssize_t onefilefs_read(struct file * filp, char __user * buf, size_t len, loff_t
 
     bh = (struct buffer_head *)sb_bread(filp->f_path.dentry->d_inode->i_sb, block_to_read);
     if(!bh){
-	    //mutex_unlock(&lock_log);
-		up_write(&the_inode->i_rwsem);
+	    mutex_unlock(&lock_log);
+		//up_write(&the_inode->i_rwsem);
 		return -EIO;
     }
     ret = copy_to_user(buf,bh->b_data + offset, len);
     *off += (len - ret);
     brelse(bh);
-	//mutex_unlock(&lock_log);
-	up_write(&the_inode->i_rwsem);
+	mutex_unlock(&lock_log);
+	//up_write(&the_inode->i_rwsem);
 
     return len - ret;
 
@@ -134,43 +134,43 @@ struct dentry *onefilefs_lookup(struct inode *parent_inode, struct dentry *child
     if(!strcmp(child_dentry->d_name.name, UNIQUE_FILE_NAME)){
 
 	
-	//get a locked inode from the cache 
-        the_inode = iget_locked(sb, 1);
-        if (!the_inode)
-       		 return ERR_PTR(-ENOMEM);
+		//get a locked inode from the cache 
+		the_inode = iget_locked(sb, 1);
+		if (!the_inode)
+			return ERR_PTR(-ENOMEM);
 
-	//already cached inode - simply return successfully
-	if(!(the_inode->i_state & I_NEW)){
+		//already cached inode - simply return successfully
+		if(!(the_inode->i_state & I_NEW)){
+			return child_dentry;
+		}
+
+
+		//this work is done if the inode was not already cached
+		inode_init_owner(current->cred->user_ns, the_inode, NULL, S_IFREG );
+		the_inode->i_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH | S_IWUSR | S_IWGRP | S_IXUSR | S_IXGRP | S_IXOTH;
+		the_inode->i_fop = &onefilefs_file_operations;
+		the_inode->i_op = &onefilefs_inode_ops;
+
+		//just one link for this file
+		set_nlink(the_inode,1);
+
+		//now we retrieve the file size via the FS specific inode, putting it into the generic inode
+		bh = (struct buffer_head *)sb_bread(sb, SINGLEFILEFS_INODES_BLOCK_NUMBER );
+	   	if(!bh){
+			iput(the_inode);
+			return ERR_PTR(-EIO);
+	   	}
+		FS_specific_inode = (struct onefilefs_inode*)bh->b_data;
+		the_inode->i_size = FS_specific_inode->file_size;
+		brelse(bh);
+
+		d_add(child_dentry, the_inode);
+		dget(child_dentry);
+
+		//unlock the inode to make it usable 
+		unlock_new_inode(the_inode);
+
 		return child_dentry;
-	}
-
-
-	//this work is done if the inode was not already cached
-	inode_init_owner(current->cred->user_ns, the_inode, NULL, S_IFREG );
-	the_inode->i_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH | S_IWUSR | S_IWGRP | S_IXUSR | S_IXGRP | S_IXOTH;
-        the_inode->i_fop = &onefilefs_file_operations;
-	the_inode->i_op = &onefilefs_inode_ops;
-
-	//just one link for this file
-	set_nlink(the_inode,1);
-
-	//now we retrieve the file size via the FS specific inode, putting it into the generic inode
-    	bh = (struct buffer_head *)sb_bread(sb, SINGLEFILEFS_INODES_BLOCK_NUMBER );
-    	if(!bh){
-		iput(the_inode);
-		return ERR_PTR(-EIO);
-    	}
-	FS_specific_inode = (struct onefilefs_inode*)bh->b_data;
-	the_inode->i_size = FS_specific_inode->file_size;
-        brelse(bh);
-
-        d_add(child_dentry, the_inode);
-	dget(child_dentry);
-
-	//unlock the inode to make it usable 
-    	unlock_new_inode(the_inode);
-
-	return child_dentry;
     }
 
     return NULL;

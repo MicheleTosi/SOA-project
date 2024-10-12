@@ -1,10 +1,14 @@
 #include <linux/fs.h>
+#include <linux/file.h>
 #include <linux/dcache.h>
 #include <linux/path.h>
 #include <linux/namei.h>
-#include <linux/sched.h>
 #include <linux/fs_struct.h>
 #include <linux/slab.h>    // Per kmalloc e kfree
+#include <linux/sched/mm.h>        // Necessario per get_task_mm e mm_struct
+#include <linux/sched.h>     // Necessario per current (puntatore al task corrente)
+#include <linux/kernel.h>    // Necessario per printk
+#include <linux/err.h>       // Necessario per IS_ERR
 
 #include "constants.h"
 #include "../reference_monitor.h"
@@ -177,4 +181,56 @@ int rm_rec_off(void){
     change_rm_state(REC_OFF);
 
     return 0;
+}
+
+/*Ottiene il percorso del file eseguibile del processo corrente
+ see: https://stackoverflow.com/questions/18862057/get-the-absolute-path-of-current-running-program-in-kernel
+      https://elixir.bootlin.com/linux/v5.0.21/source/fs/d_path.c#L256
+ */
+
+char *get_current_proc_path(void) {
+
+    char *buf;
+    char *result;
+    struct file *exe_file;
+    struct mm_struct *mm;
+
+    buf = kmalloc(MAX_LEN, GFP_KERNEL);   /*allocazione buffer e controllo errori*/
+    if (!buf) {
+        printk(KERN_ERR "%s: Impossible to allocate space for buf\n", MOD_NAME);
+        return ERR_PTR(-ENOMEM);
+    }
+
+    exe_file = NULL;
+    result = NULL;
+
+    mm = get_task_mm(current); //ottiene memory descriptor
+    if (!mm) {
+        printk(KERN_ERR "%s: Failed to get mm_struct\n", MOD_NAME);
+        kfree(buf);
+        return ERR_PTR(-ENOENT);
+    }
+
+    mmap_read_lock(mm);     //acquisisco lock
+    exe_file = mm->exe_file; //accedo al file eseguibile del processo
+
+    if (exe_file) { //incremento contatori al file e al path
+        get_file(exe_file);
+        path_get(&exe_file->f_path);
+    }
+    mmap_read_unlock(mm);  //rilascio lock e struttura
+    mmput(mm);
+
+    if (exe_file) { //tramite d_path ottengo percorso completo 
+        result = d_path(&exe_file->f_path, buf, MAX_LEN); //Callers should use the returned pointer, not the passed in buffer, to use the name.
+        if (IS_ERR(result)) {
+            printk(KERN_ERR "%s: Error getting path\n", MOD_NAME);
+        }
+        path_put(&exe_file->f_path); //rilascio riferimento percorso e file
+        fput(exe_file);
+    }
+
+    kfree(buf);
+
+    return result;
 }
