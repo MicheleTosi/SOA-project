@@ -10,7 +10,7 @@
 #define DO_MKDIRAT "do_mkdirat"
 #define DO_UNLINKAT "do_unlinkat"
 
-#define PASSWORD_HASH_SIZE 32
+#define HASH_SIZE 32
 
 #define PASSWORD_LENGHT 32
 

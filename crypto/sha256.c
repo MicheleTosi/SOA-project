@@ -1,4 +1,5 @@
 #include <crypto/hash.h>
+#include <linux/fs.h>
 
 #include "sha256.h"
 #include "../utils/constants.h"
@@ -38,14 +39,48 @@ int calculate_sha256(const char *password, size_t password_len, u8 *hashed_passw
     return ret;
 }
 
+int calculate_sha256_file_content(struct file *filp, u8 *hash){
+
+	ssize_t bytes_read;
+	int i, ret;
+	u8 curr_hash[HASH_SIZE];
+	char *buffer;
+	loff_t offset=0;
+	
+	buffer=kmalloc(BLOCK_SIZE, GFP_KERNEL);
+	if (!buffer) {
+		printk(KERN_ERR "%s: errore nell'allocazione della memoria per buffer\n", MOD_NAME);
+		return 0;
+	}
+	
+	
+	//lettura blocco per blocco fino a fine file
+	while((bytes_read = kernel_read(filp, buffer, BLOCK_SIZE, &offset))>0){
+		//calcolo hash blocco per blocco
+		ret=calculate_sha256(buffer, bytes_read, curr_hash);
+		
+		if(ret<0){
+			return 0;
+		}
+		
+		//XOR tra hash accumulato e quello appena calcolato
+		for (i = 0; i < HASH_SIZE; i++) {
+	    	hash[i] ^= curr_hash[i];
+		}
+	}
+
+
+	return 1;
+}
+
 // Funzione per verificare la password fornita dall'utente
 int verify_password(const char *input_password, size_t input_password_len, const u8 *stored_hash) {
-    u8 input_hash[PASSWORD_HASH_SIZE];
+    u8 input_hash[HASH_SIZE];
     
     // Hash della password fornita dall'utente
     if (calculate_sha256(input_password, input_password_len, input_hash) == 0) {
         // Confronta l'hash calcolato con l'hash memorizzato
-        if (memcmp(input_hash, stored_hash, PASSWORD_HASH_SIZE) == 0) {
+        if (memcmp(input_hash, stored_hash, HASH_SIZE) == 0) {
             pr_info("Password corretta\n");
             return 1;  // Password verificata correttamente
         } else {
@@ -63,8 +98,27 @@ void print_hash(const u8 *password){
     int i;
     
     pr_info("Password hash: ");
-    for (i = 0; i < SHA256_LENGTH; i++) {
+    for (i = 0; i < HASH_SIZE; i++) {
         pr_cont("%02x", password[i] & 0xff);
     }
     pr_cont("\n");
+}
+
+char *u8_to_string(const u8 *input) {
+    char *output;
+    size_t i;
+
+    // Alloca memoria per la stringa di output
+    output = kmalloc(HASH_SIZE, GFP_KERNEL);
+    if (!output) {
+        return NULL; // Gestione errore in caso di allocazione fallita
+    }
+
+    // Converte ogni byte in un formato esadecimale
+    for (i = 0; i < HASH_SIZE; i++) {
+        snprintf(&output[i*2],3,"%02x", input[i] & 0xff);
+    }
+    output[HASH_SIZE * 2] = '\0'; // Termina la stringa
+
+    return output; // Restituisce la stringa allocata
 }

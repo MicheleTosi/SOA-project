@@ -23,6 +23,9 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Michele Tosi");
 MODULE_DESCRIPTION("Questo modulo implementa un reference monitor come da specifiche presenti nel file README.md");
 
+char *the_file = NULL;
+module_param(the_file, charp, 0660);
+MODULE_PARM_DESC(the_file, "Path to the log file");
 
 static int major;
 
