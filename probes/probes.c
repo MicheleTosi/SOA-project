@@ -130,10 +130,6 @@ static int handler_pre_do_filp_open(struct kretprobe_instance *kp, struct pt_reg
     path_kernel = ((struct filename *)(regs->si))->name;
     path_user = ((struct filename *)(regs->si))->uptr;
     
-    if(strncmp(path_kernel, "/run", 4) == 0) {
-    	return 0;
-    }
-    
     directory=get_absolute_path(path_kernel);
     printk("user path: %s\n", path_kernel);
     printk("user path: %s\n", directory);
@@ -301,7 +297,7 @@ int register_probes(){
     
     printk(KERN_INFO "%s: kprobes registered\n", MOD_NAME);
     
-    return ret;
+    return 0;
 	
 }
 
@@ -320,6 +316,8 @@ void enable_probes(){
 	enable_kretprobe(&kp_do_unlinkat);
 	enable_kretprobe(&kp_do_mkdir);
 	enable_kretprobe(&kp_do_rmdir);
+    
+    printk(KERN_INFO "%s: kprobes enabled\n", MOD_NAME);
 }
 
 void disable_probes(){
@@ -327,4 +325,6 @@ void disable_probes(){
     disable_kretprobe(&kp_do_unlinkat);
     disable_kretprobe(&kp_do_mkdir);
     disable_kretprobe(&kp_do_rmdir);
+    
+    printk(KERN_INFO "%s: kprobes disabled\n", MOD_NAME);
 }

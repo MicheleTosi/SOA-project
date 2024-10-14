@@ -3,6 +3,7 @@
 
 #include "sha256.h"
 #include "../utils/constants.h"
+#include "../reference_monitor.h"
 
 int calculate_sha256(const char *password, size_t password_len, u8 *hashed_password) {
     struct crypto_shash *tfm;
@@ -74,13 +75,14 @@ int calculate_sha256_file_content(struct file *filp, u8 *hash){
 }
 
 // Funzione per verificare la password fornita dall'utente
-int verify_password(const char *input_password, size_t input_password_len, const u8 *stored_hash) {
+int verify_password(const char *input_password) {
     u8 input_hash[HASH_SIZE];
+    ssize_t input_password_len=strlen(input_password);
     
     // Hash della password fornita dall'utente
     if (calculate_sha256(input_password, input_password_len, input_hash) == 0) {
         // Confronta l'hash calcolato con l'hash memorizzato
-        if (memcmp(input_hash, stored_hash, HASH_SIZE) == 0) {
+        if (memcmp(input_hash, config.password, HASH_SIZE) == 0) {
             pr_info("Password corretta\n");
             return 1;  // Password verificata correttamente
         } else {

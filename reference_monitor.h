@@ -1,6 +1,11 @@
 #ifndef REFERENCE_MONITOR_H
 #define REFERENCE_MONITOR_H
 
+#include "utils/constants.h"
+#include "crypto/sha256.h"
+#include "utils/utils.h"
+#include "probes/probes.h"
+#include "path_list/path_list.h"
 
 //nodi path bloccati
 typedef struct path_node{
@@ -16,7 +21,6 @@ typedef enum reference_monitor_state {
     REC_OFF,        // Può essere riconfigurato in modalita' OFF
 }rm_state;
 
-
 // Configurazione attuale reference monitor
 typedef struct reference_monitor_config {
     rm_state rm_state;                      // Stato corrente reference monitor
@@ -27,6 +31,8 @@ typedef struct reference_monitor_config {
 extern rm_config config;
 
 extern char *the_file;
+
+//extern char *module_name;
 
 extern spinlock_t RM_lock;
 

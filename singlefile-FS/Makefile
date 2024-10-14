@@ -16,8 +16,9 @@ create-fs:
 	dd bs=4096 count=100 if=/dev/zero of=image
 	./singlefilemakefs image
 	mkdir mount
-	
+
 mount-fs:
+
 	sudo mount -o loop -t singlefilefs image ./mount/
 
 remove:

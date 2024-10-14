@@ -1,4 +1,5 @@
 #include <linux/fs.h>
+#include <linux/module.h>
 #include <linux/file.h>
 #include <linux/dcache.h>
 #include <linux/path.h>
@@ -233,4 +234,15 @@ char *get_current_proc_path(void) {
     kfree(buf);
 
     return result;
+}
+
+int set_password(char *password){
+	int ret;
+	// Calcola l'hash SHA-256 della password
+    ret = calculate_sha256(password, strlen(password), config.password);
+    if (ret) {
+        pr_err("Failed to calculate SHA-256 hash\n");
+        return -EINVAL;
+    }
+    return ret;
 }

@@ -5,7 +5,7 @@ int calculate_sha256(const char *password, size_t password_len, u8 *hashed_passw
 
 int calculate_sha256_file_content(struct file *filp, u8 *hash);
 
-int verify_password(const char *input_password, size_t input_password_len, const u8 *stored_hash);
+int verify_password(const char *input_password);
 
 void print_hash(const u8 *password);
 

@@ -12,12 +12,8 @@
 #include <linux/fs.h>
 #include <linux/dcache.h>
 
-
-#include "utils/constants.h"
-#include "crypto/sha256.h"
-#include "utils/utils.h"
-#include "probes/probes.h"
 #include "reference_monitor.h"
+#define LINE_SIZE 256
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Michele Tosi");
@@ -26,6 +22,10 @@ MODULE_DESCRIPTION("Questo modulo implementa un reference monitor come da specif
 char *the_file = NULL;
 module_param(the_file, charp, 0660);
 MODULE_PARM_DESC(the_file, "Path to the log file");
+
+char *module_name=NULL;
+module_param(module_name, charp, 0660);
+MODULE_PARM_DESC(module_name, "Module name");
 
 static int major;
 
@@ -36,6 +36,14 @@ static int rm_open(struct inode *inode, struct file *filp);
 static ssize_t rm_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
 
 rm_config config;
+
+// Mappa dei nomi degli stati
+static const char *status_names[] = {
+    [ON] = "\"start\"",
+    [OFF] = "\"stop\"",
+    [REC_ON] = "\"reconfig_on\"",
+    [REC_OFF] = "\"reconfig_off\""
+};
 
 struct file_operations my_fops = {
     .owner=THIS_MODULE,
@@ -50,78 +58,86 @@ static int rm_open(struct inode *inode, struct file *filp)
 
 static ssize_t rm_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos)
 {
-    return 0;
-}
-
-//controllo se nella lista è già presente il path passato in input
-int check_list(char *abs_path){
-	path_node *curr=config.head;
-
-	printk("entrato in check_list");
+	int ret;
+	char *buffer, *cmd, *password, *new_password,*p, *path;
 	
-	//scorro la lista di percorsi bloccati per vedere se è presente il path passato in input	
-	while(curr){
-		printk("path: %s abs_path: %s head: %s\n", curr->path, abs_path, config.head->path);
-		if(strcmp(curr->path, abs_path)==0){
-			printk(KERN_INFO "Path already exist %s\n", abs_path);
-			return 1;
-		}
-		curr=curr->next;
-	}
-	
-	return 0;
-	
-}
-
-int add_path(char *path){
-	
-	char *abs_path=get_absolute_path(path);		//convert path to absolute path
-	path_node *new_node;
-	int res;
-	
-	if(!abs_path){
-		printk(KERN_ERR "%s: could not resolve absolute path\n", MOD_NAME);
+	if(count>=LINE_SIZE){
+		printk(KERN_ERR "%s: input lenght too large", MOD_NAME);
 		return -EINVAL;
 	}
 	
-	if(config.rm_state!=REC_ON && config.rm_state!=REC_OFF){
-		printk(KERN_ERR "%s: state must be REC_ON or REC_OFF\n", MOD_NAME);
-		return -EINVAL;
+	// alloco spazio per il buffer che conterrà in input il comando utente
+	buffer=kmalloc(LINE_SIZE, GFP_KERNEL);
+	if(!buffer){
+		printk(KERN_ERR "%s: Errore nell'allocazione della memoria per il buffer in rm_write", MOD_NAME);
+		return -ENOMEM;
 	}
 	
-	
-	/*if(the_file && strncmp(abs_path, the_file, strlen(the_file))==0){
-		printk(KERN_ERR "Error: cannot protect the log file path\n");
-		return -EINVAL;
-	}*/
-	
-	spin_lock(&RM_lock);
-	
-	if((res=check_list(path))){
-		printk("path già presente %d\n", res);
-		spin_unlock(&RM_lock);
-		return res;
+	ret=copy_from_user(buffer, buf, count);
+	if(ret){
+		printk(KERN_ERR "%s: errore nella copia dei dati, %d byte non copiati\n", MOD_NAME, ret);
+		return -EFAULT;
 	}
 	
-	//Creation of the new node
-    new_node = kmalloc(sizeof(struct path_node), GFP_KERNEL);
-    if (!new_node) {
-        printk(KERN_ERR "Failed to allocate memory for new node\n");
-        spin_unlock(&RM_lock);
-        return -ENOMEM;
+	//separo i comandi nell'input utente
+	cmd=strsep(&buffer, " ");
+	if(strcmp(cmd, "ref_monitor")){
+		printk(KERN_INFO "%s: Il primo elemento del comando deve essere \"ref_monitor\"", MOD_NAME);
+		return -EACCES;
+	}
+	cmd=strsep(&buffer, " ");
+	
+	if(strcmp(cmd, "add-path") == 0 || strcmp(cmd, "remove-path") == 0){
+		path=strsep(&buffer, " ");
+		printk(KERN_INFO "path_ : %s", path);
+	}
+	
+	//cerco all'interno della stringa di input utente il punto in cui inizia la password -p
+	password=strnstr(buffer, "-p ", strlen(buffer));
+	//faccio partire la password 4 caratteri dopo escludendo '-p "'
+	password+=4;
+	//tolgo la virgoletta posta come ultimo carattere
+	password[strlen(password)-1]='\0';
+	
+	if((new_password=strnstr(buffer, "-np ", strlen(buffer)))){
+		new_password+=5;
+		p=strnstr(buffer, " -p", strlen(buffer));
+		*(--p)='\0';
+	}
+	
+	printk(KERN_INFO "Password inserita in input: %s\n", password);
+	
+	//password=obtain_password();
+	if(!verify_password(password)){
+		printk(KERN_INFO "verificando la password..\n");
+		return -EACCES;
+	}
+	
+	printk(KERN_INFO "%s: password: %s, new_password: %s, comando: %s\n", MOD_NAME, password, new_password, cmd);
+	
+	if (strcmp(cmd, "start") == 0) {
+        rm_on();
+    } else if (strcmp(cmd, "stop") == 0) {
+        rm_off();
+    } else if (strcmp(cmd, "reconfig_on") == 0) {
+        rm_rec_on();
+    } else if (strcmp(cmd, "reconfig_off") == 0) {
+        rm_rec_off();
+    } else if (strcmp(cmd, "status") == 0) {
+        printk("status corrente %s",status_names[config.rm_state]);
+    } else if (strcmp(cmd, "set-password") == 0) {
+    	set_password(new_password);
+    } else if (strcmp(cmd, "add-path") == 0) {
+        add_path(path);  // Pass the second argument (path)
+    } else if (strcmp(cmd, "remove-path") == 0) {
+        rm_path(path);  // Pass the second argument (path)
+    } else {
+        printk("Unknown cmd: %s\n", cmd);
+        return -EINVAL;
     }
-    //new_node->path = abs_path;
-    new_node->path= kmalloc(strlen(abs_path)+1, GFP_KERNEL);
-    strncpy(new_node->path, abs_path, strlen(abs_path)+1);
-    new_node->next = config.head;
-    config.head = new_node;
-
-    spin_unlock(&RM_lock);
-
-    printk(KERN_INFO "Path inserted: %s\n", abs_path);
-
-    return 0;
 	
+	
+    return 0;
 }
 
 int change_password(char *new_password){
@@ -167,31 +183,20 @@ static int my_module_init(void) {
         return ret;
     }
 
-    pr_info("SHA-256 hash of password calculated successfully\n");
-
-    print_hash(config.password);
-
-    rm_rec_off();
-    
-    printk(KERN_INFO "state corrente %d\n", config.rm_state);
-    
-    add_path("/home/vboxuser/Scrivania/prova");
-    
-    printk("curr_node %s\n", config.head->path);
-    if(verify_password("password1", strlen("password1"), config.password)){
-    	printk(KERN_INFO "la password corrisponde");
-    }
-
-    if(!(ret=register_probes())){
+	//registro le kretprobes
+    if((ret=register_probes())){
     	return ret;
     }
 
+	//inizialmente il reference monitor ha stato OFF e le kretprobe sono disabilitate
+    config.rm_state=OFF;
+    disable_probes();
+    
+    printk(KERN_INFO "state corrente %d\n", config.rm_state);
+    
     printk("%s: reference monitor module correctly loaded\n", MOD_NAME);
     
     printk(KERN_INFO "%s: prova get_abs %s ciao\n", MOD_NAME, get_absolute_path("utils.h"));
-    
-    // Registra la kprobe
-    // Inizializzare deferred workqueue
 
     return 0;
 }
