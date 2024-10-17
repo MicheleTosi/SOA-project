@@ -111,7 +111,7 @@ char *u8_to_string(const u8 *input) {
     size_t i;
 
     // Alloca memoria per la stringa di output
-    output = kmalloc(HASH_SIZE, GFP_KERNEL);
+    output = kmalloc(HASH_SIZE*2+1, GFP_KERNEL);
     if (!output) {
         return NULL; // Gestione errore in caso di allocazione fallita
     }

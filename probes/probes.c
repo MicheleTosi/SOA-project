@@ -83,8 +83,8 @@ static int handler_pre_do_mkdirat(struct kretprobe_instance *kp, struct pt_regs 
 	    regs->ax = -EPERM;
 	    regs->di = (unsigned long)NULL;
 
-
             printk(KERN_ERR "%s: mkdir operation was blocked: %s\n",MOD_NAME, name);
+	    if(info.tmp!=NULL) kfree(info.tmp);
 	    spin_unlock(&RM_lock);
             return 0;
         }
@@ -92,7 +92,7 @@ static int handler_pre_do_mkdirat(struct kretprobe_instance *kp, struct pt_regs 
         // Ottieni la info.absolute_path genitore
         info.absolute_path = get_dir_parent(info.absolute_path);
     }
-	//if(info.tmp!=NULL) kfree(info.tmp);
+	if(info.tmp!=NULL) kfree(info.tmp);
 	spin_unlock(&RM_lock);
     return 0;
 }
@@ -167,17 +167,17 @@ static int handler_pre_do_filp_open(struct kretprobe_instance *kp, struct pt_reg
 	
 		if(check_list(info.absolute_path)){
 			data->block_flag=1;
-			printk(KERN_INFO "%s: Bloccata scrittura su file vietato %s.\n", MOD_NAME, info.absolute_path);
+			printk(KERN_ERR "%s: Bloccata scrittura su file vietato %s.\n", MOD_NAME, info.absolute_path);
 			op->open_flag = O_RDONLY;
+			if(info.tmp!=NULL) kfree(info.tmp);
 			spin_unlock(&RM_lock);
-			//if(info.tmp!=NULL) kfree(info.tmp);
            		return 0;
 		}
 		
 		info.absolute_path = get_dir_parent(info.absolute_path); //itero sui parent della info.absolute_path passata
 	}
 	
-	//if(info.tmp!=NULL) kfree(info.tmp);
+	if(info.tmp!=NULL) kfree(info.tmp);
 	spin_unlock(&RM_lock);
         return 0;
 }
@@ -217,19 +217,20 @@ static int handler_pre_rm(struct kretprobe_instance *kp, struct pt_regs *regs) {
 	    data->block_flag=1; //flag per bloccare l'operazione
             
             // Blocca l'operazione modificando il valore dei registri
-			regs->ax = -EPERM;
-			regs->di = (unsigned long)NULL;
+	    regs->ax = -EPERM;
+	    regs->di = (unsigned long)NULL;
 
 
             printk(KERN_ERR "%s: rmdir/unlinkat operation was blocked: %s\n",MOD_NAME, name);
-			spin_unlock(&RM_lock);
+            if(info.tmp!=NULL) kfree(info.tmp);
+	    spin_unlock(&RM_lock);
             return 0;
         }
 
         // Ottieni la info.absolute_path genitore
         info.absolute_path = get_dir_parent(info.absolute_path);
     }
-	//if(info.tmp!=NULL) kfree(info.tmp);
+	if(info.tmp!=NULL) kfree(info.tmp);
 	spin_unlock(&RM_lock);
     return 0;
 }
@@ -302,7 +303,7 @@ int register_probes(){
 }
 
 void unregister_probes(){
-	unregister_kretprobe(&kp_do_filp_open);
+    unregister_kretprobe(&kp_do_filp_open);
     unregister_kretprobe(&kp_do_unlinkat);
     unregister_kretprobe(&kp_do_mkdir);
     unregister_kretprobe(&kp_do_rmdir);
@@ -321,7 +322,7 @@ void enable_probes(){
 }
 
 void disable_probes(){
-	disable_kretprobe(&kp_do_filp_open);
+    disable_kretprobe(&kp_do_filp_open);
     disable_kretprobe(&kp_do_unlinkat);
     disable_kretprobe(&kp_do_mkdir);
     disable_kretprobe(&kp_do_rmdir);

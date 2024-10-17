@@ -56,9 +56,9 @@ ssize_t onefilefs_write_iter(struct kiocb *iocb, struct iov_iter *from){
     
     append_offset += len;						// nuova posizione da cui scrivere
     
- 	the_inode->i_size = append_offset;			// nuovo offset
+ 	the_inode->i_size = append_offset;			        // nuovo offset
  	i_size_write(the_inode, append_offset);			// aggiornamento dimensione
- 	brelse(bh);									// rilascio buffer
+ 	brelse(bh);							// rilascio buffer
  	mutex_unlock(&lock_log);
  	//mutex_unlock(&the_inode->i_mutex);
  	//up_write(&the_inode->i_rwsem);

@@ -117,7 +117,7 @@ int temp_file(char *str){
     // se è maggiore di 4 e termina con '.swp'
      (len >4 &&	(str[len - 1]=='p' &&  str[len - 2]=='w' &&str[len - 3]=='s' &&str[len - 4]=='.'))||
      //maggiore di 5 e termina con '.spwx'
-    	(len >5 && str[len - 1]=='x' && str[len - 2]=='p' && str[len - 3]=='w' &&str[len - 4]=='s' &&str[len - 6]=='.')) {
+    	(len >5 && str[len - 1]=='x' && str[len - 2]=='p' && str[len - 3]=='w' &&str[len - 4]=='s' &&str[len - 5]=='.')) {
         return 1; // file temporaneo
     }
     
@@ -228,7 +228,7 @@ char *get_current_proc_path(void) {
         fput(exe_file);
     }
 
-    kfree(buf);
+    //kfree(buf);
 
     return result;
 }
@@ -236,7 +236,7 @@ char *get_current_proc_path(void) {
 int set_password(char *password){
     int ret;
 
-    if(!(config.rm_state=REC_ON || config.rm_state==REC_OFF)){
+    if(!(config.rm_state==REC_ON || config.rm_state==REC_OFF)){
         printk(KERN_ERR "Lo stato deve essere \"REC_ON\" o \"REC_OFF\" per poter modificare la configurazione\n");
         return -EINVAL;
     }

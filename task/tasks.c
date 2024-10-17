@@ -9,8 +9,8 @@
 #include "../reference_monitor.h"
 #include "../utils/utils.h"
 
-//78 è la lunghezza della stringa esclusi i dati presi da data
-#define RECORD_SIZE 2*sizeof(pid_t)+2*sizeof(uid_t)+PATH_MAX+HASH_SIZE+78 
+//78 è la lunghezza della stringa esclusi i dati presi da data; considero 8 caratteri per la taglia di tgid pid uid e euid
+#define RECORD_SIZE 2*8+2*8+PATH_MAX+HASH_SIZE+78 
 
 int tupla_data_to_buffer(rm_work_def *data, char *buffer){
 	int written;
@@ -39,7 +39,7 @@ bool write_append(char *buf){
 	//apro il file in modalità append only
 	file=filp_open(the_file, O_WRONLY|O_APPEND, 0);
 	if(IS_ERR(file)){
-		printk(KERN_ERR "%s: errore nell'apertura di the_file: %ld\n", MOD_NAME, PTR_ERR(file));
+		printk(KERN_ERR "%s: errore nell'apertura di the_file\n", MOD_NAME);
 		return false;
 	}
 	

@@ -1,0 +1,21 @@
+***Refernce monitor log***
+TGID: 3909 | PID: 3909 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/rm | Program hashed content: 663ebfa2611923154fc2f91a24f84802810847bfd9c2c8521213d8fa616f14ad 
+TGID: 3910 | PID: 3910 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/rm | Program hashed content: 663ebfa2611923154fc2f91a24f84802810847bfd9c2c8521213d8fa616f14ad 
+TGID: 3911 | PID: 3911 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/rm | Program hashed content: 663ebfa2611923154fc2f91a24f84802810847bfd9c2c8521213d8fa616f14ad 
+TGID: 3913 | PID: 3913 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/rm | Program hashed content: 663ebfa2611923154fc2f91a24f84802810847bfd9c2c8521213d8fa616f14ad 
+TGID: 3921 | PID: 3921 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/rmdir | Program hashed content: 74481e0b869f92d7f50f8d838ba7a2d390c93b8b57caf7f98fc336f075ab4f90 
+TGID: 3922 | PID: 3922 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/rmdir | Program hashed content: 74481e0b869f92d7f50f8d838ba7a2d390c93b8b57caf7f98fc336f075ab4f90 
+TGID: 3923 | PID: 3923 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/rm | Program hashed content: 663ebfa2611923154fc2f91a24f84802810847bfd9c2c8521213d8fa616f14ad 
+TGID: 2096 | PID: 2096 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/bash | Program hashed content: 612585fd405d9963eebefcf571e962dc3676de52a78d33d8caed5a36b9479117 
+TGID: 2096 | PID: 2096 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/bash | Program hashed content: 612585fd405d9963eebefcf571e962dc3676de52a78d33d8caed5a36b9479117 
+TGID: 3929 | PID: 3929 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/touch | Program hashed content: f4d1bf86274cf742cbeb8390af0046b0faa8f58846b1027713b53307cf14e348 
+TGID: 3930 | PID: 3930 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/touch | Program hashed content: f4d1bf86274cf742cbeb8390af0046b0faa8f58846b1027713b53307cf14e348 
+TGID: 3933 | PID: 3933 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/mkdir | Program hashed content: d381659bf2a6b7f462de24f55fde87414b7a416ac12d1fc3e8cb2c945f33a2ab 
+TGID: 3935 | PID: 3935 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/mkdir | Program hashed content: d381659bf2a6b7f462de24f55fde87414b7a416ac12d1fc3e8cb2c945f33a2ab 
+TGID: 3936 | PID: 3936 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/touch | Program hashed content: f4d1bf86274cf742cbeb8390af0046b0faa8f58846b1027713b53307cf14e348 
+TGID: 2096 | PID: 2096 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/bash | Program hashed content: 612585fd405d9963eebefcf571e962dc3676de52a78d33d8caed5a36b9479117 
+TGID: 3937 | PID: 3937 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/touch | Program hashed content: f4d1bf86274cf742cbeb8390af0046b0faa8f58846b1027713b53307cf14e348 
+TGID: 3938 | PID: 3938 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/touch | Program hashed content: f4d1bf86274cf742cbeb8390af0046b0faa8f58846b1027713b53307cf14e348 
+TGID: 3939 | PID: 3939 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/touch | Program hashed content: f4d1bf86274cf742cbeb8390af0046b0faa8f58846b1027713b53307cf14e348 
+TGID: 2096 | PID: 2096 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/bash | Program hashed content: 612585fd405d9963eebefcf571e962dc3676de52a78d33d8caed5a36b9479117 
+TGID: 3940 | PID: 3940 | UID: 1000 | EUID: 1000 | Program Path: /usr/bin/mkdir | Program hashed content: d381659bf2a6b7f462de24f55fde87414b7a416ac12d1fc3e8cb2c945f33a2ab 
