@@ -12,7 +12,7 @@
 #include <linux/err.h>       // Necessario per IS_ERR
 
 #include "constants.h"
-#include "../reference_monitor.h"
+//#include "../reference_monitor.h"
 #include "utils.h"
 #include "../probes/probes.h"
 
@@ -23,46 +23,43 @@
  * Ritorna il percorso assoluto come stringa o NULL in caso di errore.
  * La memoria allocata per il risultato deve essere liberata con kfree() dal chiamante.
  */
-char *get_absolute_path(const char *filename)
+path_info get_absolute_path(const char *filename)
 {
 	struct path path;
-	char *absolute_path;
-	char *tmp;
+	path_info info = { .absolute_path = NULL, .tmp = NULL };
 	int err;
 
 
 	if (!filename){
 		printk(KERN_ERR "empty filename passato\n");
-		return NULL;
+		return info;
 	}
 
 	// Risolvi il percorso del file passato come stringa
 	err = kern_path(filename, LOOKUP_FOLLOW, &path);
 	if (err){
-		printk(KERN_ERR "errore in kern_path %int\n", err);
-		return NULL;
-	}
-
-	// Allocazione temporanea per il percorso
-	tmp = kmalloc(PATH_MAX, GFP_KERNEL);
-	if (!tmp) {
-		printk(KERN_ERR "%s: errore nell'allocazione della memoria per tmp\n", MOD_NAME);
-		return NULL;
+		return info;
 	}
 	
-	memset(tmp, 0, PATH_MAX);
+	// Allocazione temporanea per il percorso
+	info.tmp = kmalloc(PATH_MAX, GFP_KERNEL);
+	if (!info.tmp) {
+		printk(KERN_ERR "%s: errore nell'allocazione della memoria per tmp\n", MOD_NAME);
+		return info;
+	}
+	
+	memset(info.tmp, 0, PATH_MAX);
 
 	// Ottieni il percorso assoluto
-	absolute_path = d_path(&path, tmp, PATH_MAX);
-
-	if (IS_ERR(absolute_path)) {
- 		printk(KERN_ERR "%s: Errore d_path: %ld\n", MOD_NAME, PTR_ERR(absolute_path));
-		kfree(tmp);  // Libera la memoria in caso di errore
-		return NULL;
+	info.absolute_path = d_path(&path, info.tmp, PATH_MAX);
+	if (IS_ERR(info.absolute_path)) {
+ 		printk(KERN_ERR "%s: Errore d_path: %ld\n", MOD_NAME, PTR_ERR(info.absolute_path));
+		kfree(info.tmp);  // Libera la memoria in caso di errore
+		info.absolute_path = NULL;
+        	return info;
 	}
-
-	printk(KERN_INFO "%s: path: %s", MOD_NAME, absolute_path);
-	return absolute_path;  // Ritorna il percorso assoluto
+	
+	return info;  // Ritorna il percorso assoluto
 }
 
 /*Ottiene, dato un path, il percorso padre*/
@@ -237,11 +234,22 @@ char *get_current_proc_path(void) {
 }
 
 int set_password(char *password){
-	int ret;
-	// Calcola l'hash SHA-256 della password
+    int ret;
+
+    if(!(config.rm_state=REC_ON || config.rm_state==REC_OFF)){
+        printk(KERN_ERR "Lo stato deve essere \"REC_ON\" o \"REC_OFF\" per poter modificare la configurazione\n");
+        return -EINVAL;
+    }
+    
+    if(strcmp(password, "")==0){
+    	printk(KERN_ERR "La passowrd non può essere una stringa vuota\n");
+        return -EINVAL;
+    }
+    
+    // Calcola l'hash SHA-256 della password
     ret = calculate_sha256(password, strlen(password), config.password);
     if (ret) {
-        pr_err("Failed to calculate SHA-256 hash\n");
+        printk(KERN_ERR "Failed to calculate SHA-256 hash\n");
         return -EINVAL;
     }
     return ret;

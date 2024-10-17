@@ -43,11 +43,7 @@ bool write_append(char *buf){
 		return false;
 	}
 	
-	printk(KERN_INFO "%s: scrittura in corso sul file %s, linea %s\n", MOD_NAME, the_file, buf);
-	
 	ret = kernel_write(file,buf, strlen(buf),&pos);
-	
-	printk(KERN_INFO "%s: il valore di ret è %d\n", MOD_NAME, ret);
 	
 	//se la scrittura non va a buon fine chiudo il file e ritorno false
 	if(ret<0){
@@ -126,8 +122,6 @@ void schedule_deferred_work(void){
 	struct cred *current_credentials;
 	char *process_path;
 	
-	printk(KERN_INFO "%s: schedulazione work deferred\n", MOD_NAME);
-	
 	// Alloca memoria per i dati del task differito
 	the_task=kzalloc(sizeof(rm_work_def), GFP_KERNEL);
 	if(!the_task){
@@ -137,8 +131,6 @@ void schedule_deferred_work(void){
 	
 	// Ottieni le credenziali del processo corrente
 	current_credentials=(struct cred*) get_task_cred(current);
-	
-	printk(KERN_INFO "%s: tgid: %d, current_credentials: %d",MOD_NAME, current->tgid, current_credentials->uid.val);
 	
 	// Popola la struttura con i dati del processo corrente
 	the_task->tgid=current->tgid;
@@ -153,8 +145,6 @@ void schedule_deferred_work(void){
 		kfree(the_task);
 		return;
 	}
-	
-	printk(KERN_INFO "Fino a qui ok");
 	
 	the_task->path=kmalloc(PATH_MAX, GFP_KERNEL);
 	

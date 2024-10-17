@@ -1,6 +1,8 @@
 #ifndef REFERENCE_MONITOR_H
 #define REFERENCE_MONITOR_H
 
+#include <linux/list.h>
+
 #include "utils/constants.h"
 #include "crypto/sha256.h"
 #include "utils/utils.h"
@@ -10,8 +12,14 @@
 //nodi path bloccati
 typedef struct path_node{
 	char *path;
-	struct path_node *next;
+	struct list_head list;
 }path_node;
+
+// Definizione di una struttura per path_info
+typedef struct path_info {
+    char *absolute_path;
+    char *tmp;
+}path_info;
 
 // Enumerazione per gli stati del reference monitor
 typedef enum reference_monitor_state {
@@ -25,7 +33,8 @@ typedef enum reference_monitor_state {
 typedef struct reference_monitor_config {
     rm_state rm_state;                      // Stato corrente reference monitor
     u8 password[HASH_SIZE];		// Password per riconfigurare il reference monitor
-    path_node *head;     					// Lista path non accessibili in scrittura
+    struct list_head head;
+    //path_node *head;     					// Lista path non accessibili in scrittura
 } rm_config;
 
 extern rm_config config;

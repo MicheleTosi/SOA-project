@@ -117,7 +117,7 @@ int main() {
     	no_echo_input(&orig_term_conf);
     }
     
-    printf("Inserisci pass:\n> ");
+    printf("Inserisci password:\n> ");
     fgets(pass, LINE_SIZE, stdin);
     pass[strcspn(pass, "\n")]=0;
     
@@ -129,7 +129,7 @@ int main() {
     	new_pass[strcspn(new_pass, "\n")]=0;
     	if(ret!=NULL) printf("\n"); //se pass hide mando a capo prima di scrivere
     	
-    	printf("Inserisci la nuova password:\n> ");
+    	printf("Re-inserisci la nuova password:\n> ");
     	fgets(new_pass2, LINE_SIZE, stdin);
     	new_pass2[strcspn(new_pass2, "\n")]=0;
     	if(ret!=NULL) printf("\n");	//se passowrd hide mando a capo prima di scrivere

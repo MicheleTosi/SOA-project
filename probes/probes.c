@@ -20,28 +20,31 @@ struct kretprobe_data {
     int block_flag; // Flag per indicare se l'operazione deve essere bloccata
 };
 
+
+
 static int post_handler(struct kretprobe_instance *kp, struct pt_regs *regs){
 	struct kretprobe_data *data;
 	data = (struct kretprobe_data *)kp->data;
 
 	if (data->block_flag) {
-		schedule_deferred_work();
-        // Imposta il codice di errore per bloccare l'operazione
-        regs->ax = -EACCES;
-        data->block_flag = 0; // Reset del flag
-        printk(KERN_INFO "%s: Operation blocked by kretprobe\n",MOD_NAME);
-    }
+	    schedule_deferred_work();
+	    // Imposta il codice di errore per bloccare l'operazione
+	    regs->ax = -EACCES;
+	    data->block_flag = 0; // Reset del flag
+	    printk(KERN_INFO "%s: Operation blocked by kretprobe\n",MOD_NAME);
+	}
 
 	return 0;
 }
 
-//						di						si					dx					cx
+//			di			si			dx		cx
 //int vfs_mkdir(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode)
 static int handler_pre_do_mkdirat(struct kretprobe_instance *kp, struct pt_regs *regs) {
-    char *name, *parent, *directory;
+    char *name, *parent;
     
     struct kretprobe_data *data;
-	data  = (struct kretprobe_data *)kp->data;
+    path_info info;
+    data  = (struct kretprobe_data *)kp->data;
     
     name = (char *)((struct filename *)(regs->si))->name;
 
@@ -54,45 +57,42 @@ static int handler_pre_do_mkdirat(struct kretprobe_instance *kp, struct pt_regs 
         return 0;
     }
     
-    directory=get_absolute_path(name);
-    printk("creazione %s\n", directory);
-	if (directory == NULL) { /*se sto creando un file (quindi abs_path nullo) */
-        	// Recupera il percorso della directory genitore del file
+    info=get_absolute_path(name);
+	if (info.absolute_path == NULL) { /*se sto creando un file (quindi abs_path nullo) */
+        	// Recupera il percorso della info.absolute_path genitore del file
         	parent = get_dir_parent((char *)name);
+        	
+        	// Recupera il percorso assoluto della info.absolute_path genitore
+        	info = get_absolute_path(parent);
 
-        	// Recupera il percorso assoluto della directory genitore
-        	directory = get_absolute_path(parent);
-
-        	// Usa il percorso assoluto della directory genitore se è valido
-        	if (directory == NULL) {
-            	// Se il percorso assoluto non è valido, usa la directory corrente come fallback
-           		directory = get_cwd();
+        	// Usa il percorso assoluto della info.absolute_path genitore se è valido
+        	if (info.absolute_path == NULL) {
+            	// Se il percorso assoluto non è valido, usa la info.absolute_path corrente come fallback
+           		info.absolute_path = get_cwd();
         	}
 	}
 
-    printk(KERN_INFO "Attempt to create directory: %s\n", directory);
-
     spin_lock(&RM_lock);
-    while (directory != NULL && strcmp(directory, "") != 0 && strcmp(directory, " ") != 0) {
+    while (info.absolute_path != NULL && strcmp(info.absolute_path, "") != 0 && strcmp(info.absolute_path, " ") != 0) {
 
-        if (check_list(directory)) {
+        if (check_list(info.absolute_path)) {
 
-			data->block_flag=1; //flag per bloccare l'operazione
-            printk(KERN_ERR "%s: path or its parent directory is in blacklist: %s\n",MOD_NAME, directory);
+	    data->block_flag=1; //flag per bloccare l'operazione
             
             // Blocca l'operazione modificando il valore dei registri
-			regs->ax = -EPERM;
-			regs->di = (unsigned long)NULL;
+	    regs->ax = -EPERM;
+	    regs->di = (unsigned long)NULL;
 
 
             printk(KERN_ERR "%s: mkdir operation was blocked: %s\n",MOD_NAME, name);
-			spin_unlock(&RM_lock);
+	    spin_unlock(&RM_lock);
             return 0;
         }
 
-        // Ottieni la directory genitore
-        directory = get_dir_parent(directory);
+        // Ottieni la info.absolute_path genitore
+        info.absolute_path = get_dir_parent(info.absolute_path);
     }
+	//if(info.tmp!=NULL) kfree(info.tmp);
 	spin_unlock(&RM_lock);
     return 0;
 }
@@ -111,18 +111,19 @@ static int handler_pre_do_mkdirat(struct kretprobe_instance *kp, struct pt_regs 
 	struct audit_names	*aname;
 	const char		iname[];
 };*/
-//								di				si						dx
+//				di			si			dx
 // struct file *do_filp_open(int dfd, struct filename *pathname, const struct open_flags *op);
 //uso la do_filp_open perché quando vfs_open utilizzato il file già potrebbe essere stato creato
 static int handler_pre_do_filp_open(struct kretprobe_instance *kp, struct pt_regs *regs) {
     int fd;
     struct open_flags *op;
+    path_info info;
     const char *path_kernel, *path_user;
-    char *directory, *parent;
+    char  *parent;
     int flags;
     
     struct kretprobe_data *data;
-	data  = (struct kretprobe_data *)kp->data;
+    data  = (struct kretprobe_data *)kp->data;
     
     fd=regs->di;
     op=(struct open_flags *)(regs->dx);
@@ -130,58 +131,63 @@ static int handler_pre_do_filp_open(struct kretprobe_instance *kp, struct pt_reg
     path_kernel = ((struct filename *)(regs->si))->name;
     path_user = ((struct filename *)(regs->si))->uptr;
     
-    directory=get_absolute_path(path_kernel);
-    printk("user path: %s\n", path_kernel);
-    printk("user path: %s\n", directory);
+    if(strncmp(path_kernel, "/run", 4) == 0) {
+        return 0;
+    }
+    
+    info=get_absolute_path(path_kernel);
 
     // Logica per decidere se bloccare l'operazione
     
     //se il file è aperto in lettura, ritorno 	
-	if(!(flags & O_RDWR) && !(flags & O_WRONLY) && !(flags & (O_CREAT | __O_TMPFILE | O_EXCL )))  return 0;
-
+	if(!(flags & O_RDWR) && !(flags & O_WRONLY) && !(flags & (O_CREAT | __O_TMPFILE | O_EXCL ))){
+		//if(info.tmp!=NULL) kfree(info.tmp);
+		return 0;
+	}
+	
 	if(flags & O_CREAT){
-		printk("creazione %s\n", directory);
-		if (directory == NULL) { /*se sto creando un file (quindi abs_path nullo) */
-            	// Recupera il percorso della directory genitore del file
-            	parent = get_dir_parent((char *)path_kernel);
+		if (info.absolute_path == NULL) { /*se sto creando un file (quindi abs_path nullo) */
+		    	// Recupera il percorso della info.absolute_path genitore del file
+		    	parent = get_dir_parent((char *)path_kernel);
+			
+		    	// Recupera il percorso assoluto della info.absolute_path genitore
+		    	info = get_absolute_path(parent);
 
-            	// Recupera il percorso assoluto della directory genitore
-            	directory = get_absolute_path(parent);
-
-            	// Usa il percorso assoluto della directory genitore se è valido
-            	if (directory == NULL) {
-                	// Se il percorso assoluto non è valido, usa la directory corrente come fallback
-               		directory = get_cwd();
-            	}
+		    	// Usa il percorso assoluto della info.absolute_path genitore se è valido
+		    	if (info.absolute_path == NULL) {
+		        	// Se il percorso assoluto non è valido, usa la info.absolute_path corrente come fallback
+		       		info.absolute_path = get_cwd();
+		    	}
 		}
 	}
 	
 	spin_lock(&RM_lock);
 	
-	while (directory && *directory && strcmp(directory, " ") != 0){ //controllo che sia non NULL e non vuoto.
+	while (info.absolute_path!=NULL && strcmp(info.absolute_path, "") != 0 && strcmp(info.absolute_path, " ") != 0){ //controllo che sia non NULL e non vuoto.
 	
-		printk("Entrato");
-		if(check_list(directory)){
+		if(check_list(info.absolute_path)){
 			data->block_flag=1;
-			printk(KERN_INFO "Bloccata scrittura su file vietato %s.\n", directory);
+			printk(KERN_INFO "%s: Bloccata scrittura su file vietato %s.\n", MOD_NAME, info.absolute_path);
 			op->open_flag = O_RDONLY;
 			spin_unlock(&RM_lock);
-            return 0;
+			//if(info.tmp!=NULL) kfree(info.tmp);
+           		return 0;
 		}
-        printk("dir %s\n", directory);
-		directory = get_dir_parent(directory); //itero sui parent della directory passata
+		
+		info.absolute_path = get_dir_parent(info.absolute_path); //itero sui parent della info.absolute_path passata
 	}
-
+	
+	//if(info.tmp!=NULL) kfree(info.tmp);
 	spin_unlock(&RM_lock);
-    return 0;
+        return 0;
 }
 
 // si: struct inode*
 // dx: struct dentry *
 static int handler_pre_rm(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct dentry *dentry;
-    char *buf;
-    char *name, *directory;
+    char *name;
+    path_info info;
     struct kretprobe_data *data;
 
 	data  = (struct kretprobe_data *)kp->data;
@@ -191,31 +197,24 @@ static int handler_pre_rm(struct kretprobe_instance *kp, struct pt_regs *regs) {
 
     if (IS_ERR(name)) {
         pr_err(KERN_ERR "%s:Errore nell'ottenere il nome del file\n", MOD_NAME);
-        return 0;
+        return 1;
     }
     
-    printk(KERN_INFO "%s: Attempt to remove file/directory: %s\n", MOD_NAME, name);
-    
 	//se temp-file nop
-	if(temp_file(name)){
-        kfree(buf);
+	if(temp_file(name)){	
 		return 0;
 	}
 	
 	//percorso assoluto
-	directory=get_absolute_path(name);
-	if(!directory){
-		return 0;
-	}
-    
+	info=get_absolute_path(name);
+	if(info.absolute_path==NULL) return 1;
 	//controlla se path presente nella lista dei file bloccati
 	spin_lock(&RM_lock);
-    while (directory != NULL && strcmp(directory, "") != 0 && strcmp(directory, " ") != 0) {
+    while (info.absolute_path != NULL && strcmp(info.absolute_path, "") != 0 && strcmp(info.absolute_path, " ") != 0) {
 
-        if (check_list(directory)) {
+        if (check_list(info.absolute_path)) {
 
-			data->block_flag=1; //flag per bloccare l'operazione
-            printk(KERN_ERR "%s: path or its parent directory is in blacklist: %s\n",MOD_NAME, directory);
+	    data->block_flag=1; //flag per bloccare l'operazione
             
             // Blocca l'operazione modificando il valore dei registri
 			regs->ax = -EPERM;
@@ -227,9 +226,10 @@ static int handler_pre_rm(struct kretprobe_instance *kp, struct pt_regs *regs) {
             return 0;
         }
 
-        // Ottieni la directory genitore
-        directory = get_dir_parent(directory);
+        // Ottieni la info.absolute_path genitore
+        info.absolute_path = get_dir_parent(info.absolute_path);
     }
+	//if(info.tmp!=NULL) kfree(info.tmp);
 	spin_unlock(&RM_lock);
     return 0;
 }
@@ -267,20 +267,20 @@ int register_probes(){
 	
 	ret = register_kretprobe(&kp_do_filp_open);
     if (ret < 0) {
-        printk(KERN_INFO "register_kprobe do_filp_open failed, returned %d\n", ret);
+        printk(KERN_INFO "%s: register_kprobe do_filp_open failed, returned %d\n", MOD_NAME,ret);
         return ret;
     }
 
 	ret = register_kretprobe(&kp_do_unlinkat);
     if (ret < 0) {
-        printk(KERN_INFO "register_kprobe vfs_unlink failed, returned %d\n", ret);
+        printk(KERN_INFO "%s: register_kprobe vfs_unlink failed, returned %d\n", MOD_NAME,ret);
         unregister_kretprobe(&kp_do_filp_open);
         return ret;
     }
 
     ret = register_kretprobe(&kp_do_mkdir);
     if (ret < 0) {
-        printk(KERN_INFO "register_kprobe vfs_mkdir failed, returned %d\n", ret);
+        printk(KERN_INFO "%s: register_kprobe vfs_mkdir failed, returned %d\n", MOD_NAME,ret);
         unregister_kretprobe(&kp_do_filp_open);
         unregister_kretprobe(&kp_do_unlinkat);
         return ret;
@@ -288,7 +288,7 @@ int register_probes(){
 
     ret = register_kretprobe(&kp_do_rmdir);
     if (ret < 0) {
-        printk(KERN_INFO "register_kprobe vfs_rmdir failed, returned %d\n", ret);
+        printk(KERN_INFO "%s: register_kprobe vfs_rmdir failed, returned %d\n", MOD_NAME,ret);
         unregister_kretprobe(&kp_do_filp_open);
         unregister_kretprobe(&kp_do_unlinkat);
         unregister_kretprobe(&kp_do_mkdir);
