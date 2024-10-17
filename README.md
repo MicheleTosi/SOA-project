@@ -21,6 +21,7 @@ To interact with the module we can use:
 - user.c `sudo ./user/user` (in user directory)
 - tests `sudo ./tests/test`
 
+Default password is: "password".
 
 ## User
 To interact with reference monitor run:
@@ -28,8 +29,6 @@ To interact with reference monitor run:
 ```
 sudo ./user/user
 ```
-
-Default password is: "password".
 
 The following commands can be executed:
 
@@ -42,3 +41,15 @@ The following commands can be executed:
 - add-path [path]: add a new protected path
 - remove-path [path]: remove a protected path
 - print-logs: list events log
+
+## Tests
+Tests provide a simple way to interact with the project.
+
+To execute tests run: 
+
+```bash
+cd tests
+sudo ./tests
+```
+
+This application creates a test environment, protects a file and a directory and tries to execute the probed system calls (`create`, `open`, `unlink`, `mkdir`, `rmdir`).
