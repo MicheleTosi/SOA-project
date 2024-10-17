@@ -70,6 +70,8 @@ int add_path(char *path) {
     }
     strlcpy(new_node->path, info.absolute_path, strlen(info.absolute_path) + 1);
     
+    printk(KERN_INFO "%s: aggiunto il path: %s", MOD_NAME, info.absolute_path);
+    
     // Aggiungi il nodo alla lista
     list_add_tail(&new_node->list, &config.head);
     

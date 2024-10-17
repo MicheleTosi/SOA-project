@@ -3,7 +3,7 @@
 
 #define MAX_NUM_PATHS 128
 #define MOD_NAME "Reference Monitor"
-#define DEV_NAME "/dev/reference_monitor"
+#define DEV_NAME "/dev/ref_monitor"
 
 #define DO_FILP_OPEN "do_filp_open"
 #define DO_RMDIR "do_rmdir"

@@ -12,7 +12,7 @@
 #include <linux/err.h>       // Necessario per IS_ERR
 
 #include "constants.h"
-//#include "../reference_monitor.h"
+#include "../reference_monitor.h"
 #include "utils.h"
 #include "../probes/probes.h"
 

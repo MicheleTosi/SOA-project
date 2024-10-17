@@ -1,7 +1,6 @@
 #ifndef _UTILS_H
 #define _UTILS_H
 
-#include "../reference_monitor.h"
 
 extern struct path_info get_absolute_path(const char *filename);
 extern char *get_dir_parent(char *path);
