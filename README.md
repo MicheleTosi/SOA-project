@@ -12,13 +12,13 @@ git clone https://github.com/MicheleTosi/SOA-project.git
 cd SOA-project
 ```
 
-After this run `sudo ./start.sh` to install th reference monitor module and the single-fs file system.
+After this run `sudo ./start.sh` to install the reference monitor module and the single-fs file system.
 
 To shut down reference monitor and the single-fs run `sudo ./stop.sh`.
 
 To interact with the module we can use:
 
-- user.c `sudo ./user/user` (in user directory)
+- user.c `sudo ./user/user`
 - tests `sudo ./tests/test`
 
 Default password is: "password".
