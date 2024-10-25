@@ -27,8 +27,6 @@ ssize_t onefilefs_write_iter(struct kiocb *iocb, struct iov_iter *from){
 	loff_t append_offset;					// offset da cui iniziare la scrittura
 	
 	mutex_lock(&lock_log);
-	//mutex_lock(&the_inode->i_mutex);
-	//down_write(&the_inode->i_rwsem);
 	
 	append_offset= i_size_read(the_inode);	// offset da cui deve iniziare la scrittura
 	
@@ -44,8 +42,6 @@ ssize_t onefilefs_write_iter(struct kiocb *iocb, struct iov_iter *from){
 	bh = (struct buffer_head *)sb_bread(filp->f_path.dentry->d_inode->i_sb, block_to_write);
     if(!bh){
     	mutex_unlock(&lock_log);
-		//mutex_unlock(&the_inode->i_mutex);
-		//up_write(&the_inode->i_rwsem);
 		return -EIO;
     }
     
@@ -60,8 +56,6 @@ ssize_t onefilefs_write_iter(struct kiocb *iocb, struct iov_iter *from){
  	i_size_write(the_inode, append_offset);			// aggiornamento dimensione
  	brelse(bh);							// rilascio buffer
  	mutex_unlock(&lock_log);
- 	//mutex_unlock(&the_inode->i_mutex);
- 	//up_write(&the_inode->i_rwsem);
  	
  	return len;
 	
