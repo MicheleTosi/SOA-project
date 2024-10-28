@@ -1,5 +1,16 @@
 #include <linux/kprobes.h>
 #include <linux/slab.h>
+#include <asm-generic/errno-base.h>
+#include <linux/dcache.h>
+#include <linux/fs.h>
+#include <linux/namei.h>
+#include <linux/path.h>
+#include <linux/sched.h>
+#include <linux/sched/mm.h>
+#include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/vmalloc.h>
+#include <linux/fs_struct.h>
 
 #include "../utils/utils.h"
 #include "../utils/constants.h"
@@ -18,9 +29,48 @@ struct open_flags {
 
 struct kretprobe_data {
     int block_flag; // Flag per indicare se l'operazione deve essere bloccata
+    path_info info;
 };
 
+void mark_inode_read_only(struct inode *inode)
+{
+        inode->i_mode &= ~S_IWUSR;
+        inode->i_mode &= ~S_IWGRP;
+        inode->i_mode &= ~S_IWOTH;
+        inode->i_flags |= S_IMMUTABLE;
+        mark_inode_dirty(inode);
+}
 
+void unmark_inode_read_only(struct inode *inode)
+{
+        inode->i_mode |= S_IWUSR;      // Rendi scrivibile dall'utente
+        inode->i_mode |= S_IWGRP;      // Rendi scrivibile dal gruppo
+        inode->i_mode |= S_IWOTH;      // Rendi scrivibile da altri
+        inode->i_flags &= ~S_IMMUTABLE; // Rimuovi il flag di immutabilità
+        mark_inode_dirty(inode);       // Segna l'inode come modificato
+}
+
+int mark_inode_read_only_by_pathname(char *pathname, bool mark)
+{
+        struct path path;
+        int ret;
+        ret = kern_path(pathname, LOOKUP_FOLLOW, &path);
+        if (ret) {
+                return ret;
+        }
+
+        if (!path.dentry) {
+                return -ENOENT;
+        }
+
+	if(mark){
+	        mark_inode_read_only(path.dentry->d_inode);
+        }else{
+        	unmark_inode_read_only(path.dentry->d_inode);
+        }
+        path_put(&path);
+        return 0;
+}
 
 static int post_handler(struct kretprobe_instance *kp, struct pt_regs *regs){
 	struct kretprobe_data *data;
@@ -30,9 +80,16 @@ static int post_handler(struct kretprobe_instance *kp, struct pt_regs *regs){
 	    schedule_deferred_work();
 	    // Imposta il codice di errore per bloccare l'operazione
 	    regs->ax = -EACCES;
+	    if((data->info).absolute_path!=NULL){
+	    	printk(KERN_INFO "%s\n", (data->info).absolute_path);
+	    	mark_inode_read_only_by_pathname((data->info).absolute_path, false);
+	    }
+	    if((data->info).tmp!=NULL) kfree((data->info).tmp);
 	    data->block_flag = 0; // Reset del flag
 	    printk(KERN_INFO "%s: Operation blocked by kretprobe\n",MOD_NAME);
 	}
+	
+	
 
 	return 0;
 }
@@ -78,13 +135,13 @@ static int handler_pre_do_mkdirat(struct kretprobe_instance *kp, struct pt_regs 
         if (check_list(info.absolute_path)) {
 
 	    data->block_flag=1; //flag per bloccare l'operazione
-            
+            data->info=info;
             // Blocca l'operazione modificando il valore dei registri
-	    regs->ax = -EPERM;
 	    regs->di = (unsigned long)NULL;
+	    regs->ax = -EACCES;
+	    mark_inode_read_only_by_pathname(info.absolute_path, true);
 
             printk(KERN_ERR "%s: mkdir operation was blocked: %s\n",MOD_NAME, name);
-	    if(info.tmp!=NULL) kfree(info.tmp);
 	    spin_unlock(&RM_lock);
             return 0;
         }
@@ -215,14 +272,14 @@ static int handler_pre_rm(struct kretprobe_instance *kp, struct pt_regs *regs) {
         if (check_list(info.absolute_path)) {
 
 	    data->block_flag=1; //flag per bloccare l'operazione
+	    data->info=info;
             
             // Blocca l'operazione modificando il valore dei registri
-	    regs->ax = -EPERM;
 	    regs->di = (unsigned long)NULL;
-
+	    mark_inode_read_only_by_pathname(info.absolute_path, true);
+	    regs->ax = -EACCES;
 
             printk(KERN_ERR "%s: rmdir/unlinkat operation was blocked: %s\n",MOD_NAME, name);
-            if(info.tmp!=NULL) kfree(info.tmp);
 	    spin_unlock(&RM_lock);
             return 0;
         }
