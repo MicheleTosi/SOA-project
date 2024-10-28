@@ -19,14 +19,16 @@ ssize_t onefilefs_write_iter(struct kiocb *iocb, struct iov_iter *from){
 	struct file *filp=iocb->ki_filp; 		// ptr alla struttura file da kiocb
 	struct inode *the_inode=filp->f_inode;	// inode del file
 	
-	char *buf_data = from->kvec->iov_base;	// buffer dati da scrivere
-	size_t len = from->kvec->iov_len;		// lunghezza buffer
+	char *buf_data;				// buffer dati da scrivere
+	size_t len;					// lunghezza buffer
 	
 	int block_to_write;						// indice del blocco da scrivere sul dispositivo
 	loff_t offset;							// offset nel blocco corrente
 	loff_t append_offset;					// offset da cui iniziare la scrittura
 	
 	mutex_lock(&lock_log);
+	buf_data = from->kvec->iov_base;
+	len = from->kvec->iov_len; 
 	
 	append_offset= i_size_read(the_inode);	// offset da cui deve iniziare la scrittura
 	
@@ -66,23 +68,22 @@ ssize_t onefilefs_read(struct file * filp, char __user * buf, size_t len, loff_t
 
     struct buffer_head *bh = NULL;
     struct inode * the_inode = filp->f_inode;
-    uint64_t file_size = the_inode->i_size;
+    uint64_t file_size;
     int ret;
     loff_t offset;
     int block_to_read;//index of the block to be read from device
 
-    printk("%s: read operation called with len %ld - and offset %lld (the current file size is %lld)",MOD_NAME, len, *off, file_size);
-
     //this operation is not synchronized 
     //*off can be changed concurrently 
     //add synchronization if you need it for any reason
-	mutex_lock(&lock_log);
-	//down_write(&the_inode->i_rwsem);
+    mutex_lock(&lock_log);
+
+    file_size = the_inode->i_size;
+    printk("%s: read operation called with len %ld - and offset %lld (the current file size is %lld)",MOD_NAME, len, *off, file_size);
 
     //check that *off is within boundaries
     if (*off >= file_size){
     	mutex_unlock(&lock_log);
-        //up_write(&the_inode->i_rwsem);
         return 0;
     }
     else if (*off + len > file_size)
@@ -102,14 +103,12 @@ ssize_t onefilefs_read(struct file * filp, char __user * buf, size_t len, loff_t
     bh = (struct buffer_head *)sb_bread(filp->f_path.dentry->d_inode->i_sb, block_to_read);
     if(!bh){
 	    mutex_unlock(&lock_log);
-		//up_write(&the_inode->i_rwsem);
 		return -EIO;
     }
     ret = copy_to_user(buf,bh->b_data + offset, len);
     *off += (len - ret);
     brelse(bh);
 	mutex_unlock(&lock_log);
-	//up_write(&the_inode->i_rwsem);
 
     return len - ret;
 

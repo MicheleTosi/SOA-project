@@ -6,6 +6,8 @@
 #include "path_list.h"
 #include "../reference_monitor.h"
 
+struct mutex path_mutex;
+
 int check_list(char *abs_path) {
     path_node *curr;
     
@@ -42,12 +44,12 @@ int add_path(char *path) {
         return -EINVAL;
     }
     
-    spin_lock(&RM_lock);
+    mutex_lock(&path_mutex);
     
     if (check_list(info.absolute_path)) {
         printk("%s: path already exists\n", MOD_NAME);
         kfree(info.tmp);
-        spin_unlock(&RM_lock);
+        mutex_unlock(&path_mutex);
         return -EINVAL;
     }
     
@@ -56,7 +58,7 @@ int add_path(char *path) {
     if (!new_node) {
         printk(KERN_ERR "Failed to allocate memory for new node\n");
         kfree(info.tmp);
-        spin_unlock(&RM_lock);
+        mutex_unlock(&path_mutex);
         return -ENOMEM;
     }
     
@@ -65,7 +67,7 @@ int add_path(char *path) {
         printk(KERN_ERR "Failed to allocate memory for new_node->path\n");
         kfree(new_node);
         kfree(info.tmp);
-        spin_unlock(&RM_lock);
+        mutex_unlock(&path_mutex);
         return -ENOMEM;
     }
     strlcpy(new_node->path, info.absolute_path, strlen(info.absolute_path) + 1);
@@ -76,7 +78,7 @@ int add_path(char *path) {
     list_add_tail(&new_node->list, &config.head);
     
     kfree(info.tmp);
-    spin_unlock(&RM_lock);
+    mutex_unlock(&path_mutex);
     
     return 0;
 }
@@ -97,7 +99,7 @@ int rm_path(char *path) {
         return -EINVAL;
     }
     
-    spin_lock(&RM_lock);
+    mutex_lock(&path_mutex);
     
     // Scorro la lista di percorsi bloccati per vedere se è presente il path passato in input	
     list_for_each_entry_safe(curr, tmp, &config.head, list) {
@@ -107,13 +109,13 @@ int rm_path(char *path) {
             kfree(curr->path); // Libera la memoria allocata per il path
             kfree(curr);       // Libera la memoria del nodo
             kfree(info.tmp);   // Libera eventuali risorse temporanee
-            spin_unlock(&RM_lock);
+            mutex_unlock(&path_mutex);
             return 0; // Nodo rimosso
         }
     }
 
     kfree(info.tmp); // Libera eventuali risorse temporanee
-    spin_unlock(&RM_lock);
+    mutex_unlock(&path_mutex);
     
     return 0; // Nodo non trovato, quindi niente da rimuovere
 }
@@ -135,144 +137,3 @@ void cleanup_list(void) {
     
     return;
 }
-
-
-
-
-
-/*
-//controllo se nella lista è già presente il path passato in input
-int check_list(char *abs_path){
-	path_node *curr=config.head;
-	
-	if(curr==NULL){
-		return 0;
-	}
-	
-	//scorro la lista di percorsi bloccati per vedere se è presente il path passato in input	
-	while(curr){
-		if(strcmp(curr->path, abs_path)==0){
-			printk(KERN_INFO "Path already exist %s\n", abs_path);
-			return 1;
-		}
-		curr=curr->next;
-	}
-	
-	return 0;
-	
-}
-
-int add_path(char *path){
-	path_info info;
-	path_node *new_node;
-	int res;
-	
-	if(config.rm_state!=REC_ON && config.rm_state!=REC_OFF){
-		printk(KERN_ERR "%s: state must be REC_ON or REC_OFF\n", MOD_NAME);
-		return -EINVAL;
-	}
-	
-	info=get_absolute_path(path);		//convert path to absolute path
-	
-	if(info.absolute_path==NULL){
-		printk(KERN_ERR "%s: could not resolve absolute path\n", MOD_NAME);
-		return -EINVAL;
-	}
-	
-	if(the_file && strncmp(info.absolute_path, the_file, strlen(the_file))==0){
-		printk(KERN_ERR "Error: cannot protect the log file path\n");
-		kfree(info.tmp);
-		return -EINVAL;
-	}
-	
-	spin_lock(&RM_lock);
-	
-	if((res=check_list(info.absolute_path))){
-		printk("%s: path già presente %d\n", MOD_NAME, res);
-		kfree(info.tmp);
-		spin_unlock(&RM_lock);
-		return -EINVAL;
-	}
-	
-	//Creation of the new node
-    new_node = kmalloc(sizeof(struct path_node), GFP_KERNEL);
-    if (new_node==NULL) {
-        printk(KERN_ERR "Failed to allocate memory for new node\n");
-        kfree(info.tmp);
-        spin_unlock(&RM_lock);
-        return -ENOMEM;
-    }
-    //new_node->path = abs_path;
-    new_node->path= kmalloc(strlen(info.absolute_path)+1, GFP_KERNEL);
-    if (!new_node->path) {
-	    printk(KERN_ERR "Failed to allocate memory for new_node->path\n");
-	    kfree(new_node);
-	    kfree(info.tmp);
-	    spin_unlock(&RM_lock);
-	    return -ENOMEM;
-    }
-    strlcpy(new_node->path, info.absolute_path, strlen(info.absolute_path)+1);
-    new_node->next = config.head;
-    config.head = new_node;
-
-    kfree(info.tmp);
-    spin_unlock(&RM_lock);
-
-    return 0;
-	
-}
-
-int rm_path(char *path){
-	path_info info;
-	path_node *prev, *curr;
-	
-	prev=NULL;
-	curr=config.head;
-
-	if(config.rm_state!=REC_ON && config.rm_state!=REC_OFF){
-		printk(KERN_ERR "%s: state must be REC_ON or REC_OFF\n", MOD_NAME);
-		return -EINVAL;
-	}
-	
-	info=get_absolute_path(path);		//convert path to absolute path	
-	
-	if(info.absolute_path==NULL){
-		printk(KERN_ERR "%s: could not resolve absolute path\n", MOD_NAME);
-		return -EINVAL;
-	}
-	
-	spin_lock(&RM_lock);
-	
-	if(curr==NULL){
-		kfree(info.tmp);
-		spin_unlock(&RM_lock);
-		return 0;
-	}
-	
-	//se il nodo da eliminare è la testa della lista dei path bloccati
-	if(strcmp(curr->path, info.absolute_path)==0){
-		config.head=curr->next;
-		kfree(curr->path);
-		kfree(info.tmp);
-		spin_unlock(&RM_lock);	
-		return 0;
-	}
-	
-	//scorro la lista di percorsi bloccati per vedere se è presente il path passato in input	
-	while(curr!=NULL && strcmp(curr->path, info.absolute_path)!=0){
-		
-		prev=curr;
-		curr=curr->next;
-	}
-	
-	if(curr!=NULL){
-		prev->next=curr->next;
-		kfree(curr->path);
-		kfree(curr);
-		kfree(info.tmp);
-	}
-	
-    spin_unlock(&RM_lock);
-
-    return 0;
-}*/
