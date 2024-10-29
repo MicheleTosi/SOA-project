@@ -6,8 +6,6 @@
 #include "path_list.h"
 #include "../reference_monitor.h"
 
-struct mutex path_mutex;
-
 int check_list(char *abs_path) {
     path_node *curr;
     
@@ -44,21 +42,11 @@ int add_path(char *path) {
         return -EINVAL;
     }
     
-    mutex_lock(&path_mutex);
-    
-    if (check_list(info.absolute_path)) {
-        printk("%s: path already exists\n", MOD_NAME);
-        kfree(info.tmp);
-        mutex_unlock(&path_mutex);
-        return -EINVAL;
-    }
-    
     // Creation of the new node
     new_node = kmalloc(sizeof(path_node), GFP_KERNEL);
     if (!new_node) {
         printk(KERN_ERR "Failed to allocate memory for new node\n");
         kfree(info.tmp);
-        mutex_unlock(&path_mutex);
         return -ENOMEM;
     }
     
@@ -67,18 +55,28 @@ int add_path(char *path) {
         printk(KERN_ERR "Failed to allocate memory for new_node->path\n");
         kfree(new_node);
         kfree(info.tmp);
-        mutex_unlock(&path_mutex);
         return -ENOMEM;
     }
     strlcpy(new_node->path, info.absolute_path, strlen(info.absolute_path) + 1);
     
-    printk(KERN_INFO "%s: aggiunto il path: %s", MOD_NAME, info.absolute_path);
+    spin_lock(&RM_lock);
+    
+    if (check_list(info.absolute_path)) {
+        spin_unlock(&RM_lock);
+        kfree(new_node->path);
+        kfree(new_node);
+        printk(KERN_INFO "%s: Path already exists: %s\n", MOD_NAME, info.absolute_path);
+        kfree(info.tmp);
+        return -EINVAL;
+    }
     
     // Aggiungi il nodo alla lista
     list_add_tail(&new_node->list, &config.head);
     
+    printk(KERN_INFO "%s: aggiunto il path: %s", MOD_NAME, info.absolute_path);
+    
+    spin_unlock(&RM_lock);
     kfree(info.tmp);
-    mutex_unlock(&path_mutex);
     
     return 0;
 }
@@ -99,23 +97,23 @@ int rm_path(char *path) {
         return -EINVAL;
     }
     
-    mutex_lock(&path_mutex);
+    spin_lock(&RM_lock);
     
     // Scorro la lista di percorsi bloccati per vedere se è presente il path passato in input	
     list_for_each_entry_safe(curr, tmp, &config.head, list) {
         if (strcmp(curr->path, info.absolute_path) == 0) {
             // Rimuovi il nodo dalla lista
             list_del(&curr->list);
+            spin_unlock(&RM_lock);
             kfree(curr->path); // Libera la memoria allocata per il path
             kfree(curr);       // Libera la memoria del nodo
             kfree(info.tmp);   // Libera eventuali risorse temporanee
-            mutex_unlock(&path_mutex);
             return 0; // Nodo rimosso
         }
     }
 
+    spin_unlock(&RM_lock);
     kfree(info.tmp); // Libera eventuali risorse temporanee
-    mutex_unlock(&path_mutex);
     
     return 0; // Nodo non trovato, quindi niente da rimuovere
 }
